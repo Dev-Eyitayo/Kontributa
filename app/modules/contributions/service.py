@@ -8,6 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.exceptions import BusinessRuleError, NotFoundError
+from app.modules.audit.models import AuditActorType
+from app.modules.audit.service import AuditService
 from app.modules.auth.models import User
 from app.modules.contributions.models import ActorType, Contribution, ContributionEvent, ContributionStatus
 from app.modules.group_admins.models import GroupAdmin
@@ -15,10 +17,17 @@ from app.modules.members.models import Member
 from app.modules.payments.service import MonnifyClient
 from app.modules.purses.models import EnrollMode, Purse, PurseStatus
 
+_AUDIT_ACTOR_MAP = {
+    ActorType.WEBHOOK: AuditActorType.WEBHOOK,
+    ActorType.RECONCILIATION_JOB: AuditActorType.RECONCILIATION_JOB,
+    ActorType.REP_MANUAL: AuditActorType.GROUP_ADMIN,
+}
+
 
 class ContributionService:
     def __init__(self, db: AsyncSession):
         self.db = db
+        self.audit = AuditService(db)
 
     async def generate_for_purse(self, purse: Purse) -> list[Contribution]:
         """Called once, at purse creation. Snapshots every currently-eligible
@@ -198,6 +207,19 @@ class ContributionService:
                 actor_id=actor_id,
                 note=note,
             )
+        )
+        # Also written to the universal AuditLog, in addition to the
+        # domain-specific ContributionEvent row above -- both tables are
+        # append-only and neither replaces the other (see name-mapping /
+        # Phase 6 scope: AuditLog generalizes but does not remove these).
+        await self.audit.record_event(
+            entity_type="contribution",
+            entity_id=contribution.id,
+            action="status_transition",
+            actor_type=_AUDIT_ACTOR_MAP[actor_type],
+            actor_id=actor_id,
+            before_state={"status": from_status.value},
+            after_state={"status": to_status.value, "note": note},
         )
 
     async def expire_if_needed(self, contribution: Contribution) -> Contribution:

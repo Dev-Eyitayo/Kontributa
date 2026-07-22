@@ -131,8 +131,8 @@ async def get_purse(
 
     if current_user.role == "group_admin":
         admin = await GroupAdminService(db).get_by_user_id(current_user.id)
-        if purse.created_by_group_admin_id != admin.id:
-            raise ForbiddenError("cannot view a purse you did not create")
+        if purse.group_id != admin.group_id:
+            raise ForbiddenError("cannot view a purse outside your group")
         counts = await ContributionService(db).counts_for_purses([purse.id])
         paid_count, total_count = counts.get(purse.id, (0, 0))
         return success_response(
@@ -193,8 +193,8 @@ async def list_contributions(
 ) -> JSONResponse:
     admin = await admin_service.get_by_user_id(current_user.id)
     purse = await purse_service.get_by_id(purse_id)
-    if purse.created_by_group_admin_id != admin.id:
-        raise ForbiddenError("cannot view contributions for a purse you did not create")
+    if purse.group_id != admin.group_id:
+        raise ForbiddenError("cannot view contributions for a purse outside your group")
 
     rows = await contribution_service.list_for_purse(purse_id, status)
     return success_response(
@@ -222,8 +222,8 @@ async def get_summary(
 ) -> JSONResponse:
     admin = await admin_service.get_by_user_id(current_user.id)
     purse = await purse_service.get_by_id(purse_id)
-    if purse.created_by_group_admin_id != admin.id:
-        raise ForbiddenError("cannot view summary for a purse you did not create")
+    if purse.group_id != admin.group_id:
+        raise ForbiddenError("cannot view summary for a purse outside your group")
 
     summary = await contribution_service.summary_for_purse(purse_id)
     return success_response({**summary, "total_collected": str(summary["total_collected"])})

@@ -1,5 +1,6 @@
 import logging
-from decimal import Decimal
+import uuid
+from decimal import ROUND_DOWN, Decimal
 from typing import Optional
 from uuid import UUID
 
@@ -7,11 +8,13 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.exceptions import BusinessRuleError, ConflictError, ForbiddenError, NotFoundError
+from app.modules.audit.models import AuditActorType
+from app.modules.audit.service import AuditService
 from app.modules.contributions.models import Contribution, ContributionStatus
 from app.modules.group_admins.models import GroupAdmin
 from app.modules.organizations.models import Group
 from app.modules.payments.service import MonnifyClient, MonnifyError
-from app.modules.payouts.models import Payout, PayoutActorType, PayoutEvent, PayoutStatus
+from app.modules.payouts.models import Payout, PayoutActorType, PayoutAllocation, PayoutEvent, PayoutStatus
 from app.modules.payouts.schemas import CreatePayoutRequest
 from app.modules.purses.models import Purse
 from app.modules.settlement.models import SettlementAccount
@@ -20,10 +23,18 @@ logger = logging.getLogger("kontributa.payouts")
 
 _OUTSTANDING_STATUSES = (PayoutStatus.REQUESTED, PayoutStatus.APPROVED, PayoutStatus.PROCESSING, PayoutStatus.COMPLETED)
 
+# PayoutActorType and AuditActorType share the same value strings by design.
+_AUDIT_ACTOR_MAP = {
+    PayoutActorType.GROUP_ADMIN: AuditActorType.GROUP_ADMIN,
+    PayoutActorType.PLATFORM_ADMIN: AuditActorType.PLATFORM_ADMIN,
+    PayoutActorType.WEBHOOK: AuditActorType.WEBHOOK,
+}
+
 
 class PayoutService:
     def __init__(self, db: AsyncSession):
         self.db = db
+        self.audit = AuditService(db)
 
     async def _write_event(
         self,
@@ -43,6 +54,15 @@ class PayoutService:
                 actor_id=actor_id,
                 note=note,
             )
+        )
+        await self.audit.record_event(
+            entity_type="payout",
+            entity_id=payout.id,
+            action="status_transition",
+            actor_type=_AUDIT_ACTOR_MAP[actor_type],
+            actor_id=actor_id,
+            before_state={"status": from_status.value},
+            after_state={"status": to_status.value, "note": note},
         )
 
     async def _collected_total(self, purse_id: UUID) -> Decimal:
@@ -70,22 +90,32 @@ class PayoutService:
         )
         return result.scalar_one()
 
+    async def _purse_allocated_from_sweeps_total(self, purse_id: UUID) -> Decimal:
+        """Sum of this purse's share of any group-wide sweep payout that is
+        still outstanding (i.e. not rejected/failed, which release the
+        allocation back). This is what lets available-balance reflect money
+        that already left via a sweep even though the Payout row itself is
+        purse_id-less."""
+        result = await self.db.execute(
+            select(func.coalesce(func.sum(PayoutAllocation.allocated_amount), 0))
+            .join(Payout, PayoutAllocation.payout_id == Payout.id)
+            .where(PayoutAllocation.purse_id == purse_id, Payout.status.in_(_OUTSTANDING_STATUSES))
+        )
+        return result.scalar_one()
+
     async def get_available_balance(self, purse_id: UUID) -> dict:
-        """Purse-scoped balance. NOTE: only accounts for payouts requested
-        *against this specific purse* -- a group-wide sweep payout (purse_id
-        is null) is only tracked at the group level, not attributed back to
-        individual purses, since a sweep has no recorded per-purse
-        breakdown. A purse's displayed balance could in principle be
-        affected by a subsequent sweep; this is a known simplification,
-        not something Phase 5 builds full per-purse sweep-attribution for."""
+        """Purse-scoped balance: collected minus payouts requested directly
+        against this purse minus this purse's share of any group-wide sweep
+        payout (see PayoutAllocation)."""
         collected_total = await self._collected_total(purse_id)
         outstanding = await self._purse_outstanding_payouts_total(purse_id)
+        allocated_from_sweeps = await self._purse_allocated_from_sweeps_total(purse_id)
         paid_out_total = await self._purse_completed_payouts_total(purse_id)
         return {
             "purse_id": purse_id,
             "collected_total": collected_total,
             "paid_out_total": paid_out_total,
-            "available_balance": collected_total - outstanding,
+            "available_balance": collected_total - outstanding - allocated_from_sweeps,
         }
 
     async def _available_balance_for_group(self, group_id: UUID) -> Decimal:
@@ -109,6 +139,52 @@ class PayoutService:
         )
         outstanding = outstanding_result.scalar_one()
         return collected_total - outstanding
+
+    async def _create_sweep_allocations(self, payout: Payout, group_id: UUID, sweep_amount: Decimal) -> None:
+        """Attributes a group-wide sweep back to the individual purses it
+        drew from, proportional to each purse's own collected total at the
+        moment of the sweep. Runs inside the same transaction as the Payout
+        insert and under the same Group row lock already held by create(),
+        so this is atomic with the payout itself and race-free."""
+        purses_result = await self.db.execute(select(Purse).where(Purse.group_id == group_id))
+        purses = list(purses_result.scalars().all())
+
+        eligible: list[tuple[Purse, Decimal]] = []
+        for purse in purses:
+            collected_total = await self._collected_total(purse.id)
+            outstanding = await self._purse_outstanding_payouts_total(purse.id)
+            allocated = await self._purse_allocated_from_sweeps_total(purse.id)
+            available = collected_total - outstanding - allocated
+            if available > 0:
+                eligible.append((purse, collected_total))
+
+        total_collected = sum((collected for _, collected in eligible), Decimal("0"))
+        if not eligible or total_collected <= 0:
+            return
+
+        shares: list[tuple[Purse, Decimal]] = []
+        running_total = Decimal("0.00")
+        for purse, collected_total in eligible:
+            share = (sweep_amount * collected_total / total_collected).quantize(
+                Decimal("0.01"), rounding=ROUND_DOWN
+            )
+            shares.append((purse, share))
+            running_total += share
+
+        # Rounding truncates each share down, so the shortfall (always >= 0
+        # and < a cent per purse) is folded into the last share -- this is
+        # what guarantees the allocations sum to exactly sweep_amount.
+        remainder = (sweep_amount - running_total).quantize(Decimal("0.01"))
+        if remainder != 0:
+            last_purse, last_share = shares[-1]
+            shares[-1] = (last_purse, last_share + remainder)
+
+        for purse, share in shares:
+            if share <= 0:
+                continue
+            self.db.add(
+                PayoutAllocation(payout_id=payout.id, purse_id=purse.id, allocated_amount=share)
+            )
 
     async def create(self, admin: GroupAdmin, payload: CreatePayoutRequest) -> Payout:
         if payload.group_id != admin.group_id:
@@ -141,12 +217,17 @@ class PayoutService:
             )
 
         payout = Payout(
+            id=uuid.uuid4(),
             group_id=admin.group_id,
             purse_id=payload.purse_id,
             amount=payload.amount,
             requested_by=admin.id,
         )
         self.db.add(payout)
+
+        if payload.purse_id is None:
+            await self._create_sweep_allocations(payout, admin.group_id, payload.amount)
+
         await self.db.commit()
         await self.db.refresh(payout)
         return payout

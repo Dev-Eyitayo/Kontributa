@@ -3,7 +3,7 @@ import asyncio
 import fakeredis.aioredis
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import pool
+from sqlalchemy import pool, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.core.config import settings
@@ -20,6 +20,7 @@ from app.modules.payments.schemas import (
 from app.modules.payments.service import MonnifyError, get_monnify_client
 
 # Ensure every module's models are registered on Base.metadata before create_all.
+from app.modules.audit import models as _audit_models  # noqa: F401
 from app.modules.auth import models as _auth_models  # noqa: F401
 from app.modules.auth.models import User
 from app.modules.contributions import models as _contribution_models  # noqa: F401
@@ -36,10 +37,48 @@ from app.modules.webhooks import models as _webhook_models  # noqa: F401
 
 def _prepare_schema_once() -> None:
     async def _run():
+        # Tests build the schema directly from Base.metadata rather than
+        # running Alembic migrations, so the Phase 6 migration's role
+        # creation + GRANT/REVOKE setup (see 83d4db43c592) has to be
+        # mirrored here too -- otherwise the REVOKE-permissions test would
+        # be exercising a role that was never actually restricted.
         engine = create_async_engine(settings.DATABASE_URL, poolclass=pool.NullPool)
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.drop_all)
             await conn.run_sync(Base.metadata.create_all)
+
+            role = settings.APP_DB_ROLE
+            password = settings.APP_DB_PASSWORD
+            db_name = engine.url.database
+            superuser = engine.url.username
+
+            await conn.execute(
+                text(
+                    f"""
+                    DO $$
+                    BEGIN
+                        IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '{role}') THEN
+                            CREATE ROLE {role} LOGIN PASSWORD '{password}';
+                        END IF;
+                    END
+                    $$;
+                    """
+                )
+            )
+            await conn.execute(text(f"GRANT CONNECT ON DATABASE {db_name} TO {role}"))
+            await conn.execute(text(f"GRANT USAGE ON SCHEMA public TO {role}"))
+            await conn.execute(text(f"GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO {role}"))
+            await conn.execute(text(f"GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO {role}"))
+            await conn.execute(
+                text(
+                    f"ALTER DEFAULT PRIVILEGES FOR ROLE {superuser} IN SCHEMA public "
+                    f"GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO {role}"
+                )
+            )
+            for audit_table in ("audit_log", "contribution_events", "payout_events"):
+                await conn.execute(text(f"REVOKE UPDATE, DELETE ON {audit_table} FROM {role}"))
+
+            await conn.execute(text("INSERT INTO audit_chain_head (id, last_row_hash) VALUES (1, NULL)"))
         await engine.dispose()
 
     asyncio.run(_run())
@@ -113,8 +152,16 @@ class FakeMonnifyClient:
 async def db_setup():
     # Function-scoped so the async engine and its connections are bound to
     # the same event loop pytest-asyncio creates for this test function.
-    engine = create_async_engine(settings.DATABASE_URL, poolclass=pool.NullPool)
+    #
+    # The app-facing engine connects as the restricted runtime role (same
+    # as production), so every test genuinely exercises the app under the
+    # role that has UPDATE/DELETE revoked on the audit tables -- not just
+    # the schema-bootstrap-time superuser connection. Teardown's wipe-all
+    # step needs the superuser instead, since it deletes from those same
+    # audit tables between tests, which the restricted role can't do.
+    engine = create_async_engine(settings.RUNTIME_DATABASE_URL, poolclass=pool.NullPool)
     session_local = async_sessionmaker(bind=engine, expire_on_commit=False, autoflush=False)
+    admin_engine = create_async_engine(settings.DATABASE_URL, poolclass=pool.NullPool)
     fake_redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
 
     fake_monnify = FakeMonnifyClient()
@@ -140,11 +187,16 @@ async def db_setup():
 
     yield
 
-    async with engine.begin() as conn:
+    async with admin_engine.begin() as conn:
         for table in reversed(Base.metadata.sorted_tables):
             await conn.execute(table.delete())
+        # audit_chain_head is infrastructure, not test data -- reseed its
+        # single row so the next test's record_event() calls have a head
+        # row to lock, in sync with audit_log having just been wiped too.
+        await conn.execute(text("INSERT INTO audit_chain_head (id, last_row_hash) VALUES (1, NULL)"))
     await fake_redis.flushall()
     await engine.dispose()
+    await admin_engine.dispose()
 
     app.dependency_overrides.pop(get_db, None)
     app.dependency_overrides.pop(get_redis, None)

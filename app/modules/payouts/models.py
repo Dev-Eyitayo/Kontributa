@@ -61,6 +61,26 @@ class Payout(Base):
     )
 
 
+class PayoutAllocation(Base):
+    """Records how a group-wide sweep payout (Payout.purse_id is null) was
+    proportionally attributed back to the individual purses it drew from,
+    so a purse's available-balance calculation can account for money that
+    left via a sweep rather than a purse-scoped payout."""
+
+    __tablename__ = "payout_allocations"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    payout_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("payouts.id"), nullable=False, index=True
+    )
+    purse_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("purses.id"), nullable=False, index=True
+    )
+    allocated_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class PayoutEvent(Base):
     __tablename__ = "payout_events"
 

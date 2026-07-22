@@ -51,8 +51,8 @@ async def _assert_member_owns(db: AsyncSession, current_user: CurrentUser, contr
 async def _assert_admin_owns(db: AsyncSession, current_user: CurrentUser, contribution: Contribution):
     admin = await GroupAdminService(db).get_by_user_id(current_user.id)
     purse = await db.get(Purse, contribution.purse_id)
-    if purse is None or purse.created_by_group_admin_id != admin.id:
-        raise ForbiddenError("cannot access a contribution outside your own purses")
+    if purse is None or purse.group_id != admin.group_id:
+        raise ForbiddenError("cannot access a contribution outside your own group's purses")
     return admin, purse
 
 

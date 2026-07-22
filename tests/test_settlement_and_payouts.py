@@ -1,5 +1,6 @@
 import asyncio
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 
 from app.core.auth import create_access_token
 from tests.conftest import _state, create_org_and_group, create_platform_admin
@@ -69,6 +70,37 @@ async def _setup_purse_with_paid_contribution(client, db_session, collected="250
     assert mark.status_code == 200, mark.text
 
     return org, group, headers, purse_id
+
+
+async def _add_purse_with_collected_amount(client, db_session, headers, collected, suffix):
+    """Adds another purse (snapshotting the group's existing member(s), same
+    as _setup_purse_with_paid_contribution's initial purse) and fully pays
+    it. Deliberately does not invite a new member -- snapshot mode captures
+    every member already in the group at creation time, so inviting another
+    member here would create a second Contribution row on this same purse
+    for the group's original member too."""
+    create = await client.post(
+        "/purses",
+        json={"title": f"Fee {suffix}", "amount": collected, "deadline": _future_deadline(), "enroll_mode": "snapshot"},
+        headers=headers,
+    )
+    purse_id = create.json()["data"]["id"]
+
+    from sqlalchemy import select
+
+    from app.modules.contributions.models import Contribution
+
+    result = await db_session.execute(select(Contribution).where(Contribution.purse_id == purse_id))
+    contribution = result.scalar_one()
+
+    mark = await client.post(
+        f"/contributions/{contribution.id}/mark-manual",
+        json={"amount_received": collected, "note": "cash collected"},
+        headers=headers,
+    )
+    assert mark.status_code == 200, mark.text
+
+    return purse_id
 
 
 async def _register_settlement_account(client, group_id, headers, account_number="0123456789"):
@@ -349,6 +381,49 @@ async def test_payout_transfer_initiation_failure_marks_payout_failed(client, db
 
     final = await client.get(f"/payouts/{payout_id}", headers=headers)
     assert final.json()["data"]["status"] == "failed"
+
+
+async def test_sweep_payout_allocates_proportionally_across_purses(client, db_session):
+    org, group, headers, purse_a = await _setup_purse_with_paid_contribution(
+        client, db_session, collected="1000.00", email="sweep-rep@example.com"
+    )
+    purse_b = await _add_purse_with_collected_amount(client, db_session, headers, "2000.00", "b")
+    purse_c = await _add_purse_with_collected_amount(client, db_session, headers, "3000.00", "c")
+    # group total collected = 1000 + 2000 + 3000 = 6000.00
+
+    sweep = await client.post(
+        "/payouts", json={"group_id": str(group.id), "amount": "3000.00"}, headers=headers
+    )
+    assert sweep.status_code == 201, sweep.text
+
+    balance_a = (await client.get(f"/purses/{purse_a}/available-balance", headers=headers)).json()["data"]
+    balance_b = (await client.get(f"/purses/{purse_b}/available-balance", headers=headers)).json()["data"]
+    balance_c = (await client.get(f"/purses/{purse_c}/available-balance", headers=headers)).json()["data"]
+
+    # Proportional to each purse's collected total: a=1000/6000, b=2000/6000, c=3000/6000 of the 3000 swept.
+    assert balance_a["available_balance"] == "500.00"
+    assert balance_b["available_balance"] == "1000.00"
+    assert balance_c["available_balance"] == "1500.00"
+
+    total_available_after_sweep = (
+        Decimal(balance_a["available_balance"])
+        + Decimal(balance_b["available_balance"])
+        + Decimal(balance_c["available_balance"])
+    )
+    assert total_available_after_sweep + Decimal("3000.00") == Decimal("6000.00")
+
+    # A purse-scoped payout requested after the sweep must account for that
+    # purse's prior allocation: purse_c has 1500.00 left, not its full 3000.00.
+    within = await client.post(
+        "/payouts", json={"group_id": str(group.id), "purse_id": purse_c, "amount": "1500.00"}, headers=headers
+    )
+    assert within.status_code == 201, within.text
+
+    over = await client.post(
+        "/payouts", json={"group_id": str(group.id), "purse_id": purse_c, "amount": "0.01"}, headers=headers
+    )
+    assert over.status_code == 422
+    assert over.json()["error"]["code"] == "insufficient_balance"
 
 
 async def test_payout_approve_requires_platform_admin(client, db_session):

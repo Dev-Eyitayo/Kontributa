@@ -7,7 +7,19 @@ class Settings(BaseSettings):
     ENV: str = "development"
     APP_BASE_URL: str = "http://localhost:8000"
 
+    # Superuser connection -- used only for migrations and test schema bootstrap
+    # (DDL, and granting/revoking the runtime role's privileges below).
     DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/kontributa"
+
+    # The role the running application actually queries as. Deliberately not
+    # the superuser: this is the role that has UPDATE/DELETE revoked on
+    # audit_log (and contribution_events/payout_events) at the database
+    # level, so that guarantee holds for every request the app ever serves,
+    # not just in the ORM layer.
+    RUNTIME_DATABASE_URL: str = "postgresql+asyncpg://kontributa_app:kontributa_app_password@localhost:5432/kontributa"
+    APP_DB_ROLE: str = "kontributa_app"
+    APP_DB_PASSWORD: str = "kontributa_app_password"
+
     REDIS_URL: str = "redis://localhost:6379/0"
 
     JWT_SECRET_KEY: str = "change-me-in-production"

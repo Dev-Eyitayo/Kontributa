@@ -60,6 +60,7 @@ async def list_payouts(
 ) -> JSONResponse:
     service = PayoutService(db)
     if current_user.role == "group_admin":
+        
         admin = await GroupAdminService(db).get_by_user_id(current_user.id)
         payouts = await service.list_for_group(admin.group_id, status)
     else:

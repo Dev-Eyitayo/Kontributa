@@ -269,6 +269,36 @@ async def test_rep_cannot_manage_another_reps_purse(client, db_session):
     assert forbidden.json()["error"]["code"] == "forbidden"
 
 
+async def test_same_group_admin_can_manage_purse_they_did_not_create(client, db_session):
+    org, group, headers_a = await _setup_group_with_admin(client, db_session)
+
+    admin_b_token = await _register_and_login_group_admin(client, email="repB-sameteam@example.com")
+    headers_b = {"Authorization": f"Bearer {admin_b_token}"}
+    await client.post(
+        "/group-admins/onboard",
+        json={"organization_id": str(org.id), "group_id": str(group.id)},
+        headers=headers_b,
+    )
+
+    create = await client.post(
+        "/purses",
+        json={"title": "A's Fee", "amount": "500.00", "deadline": _future_deadline(), "enroll_mode": "snapshot"},
+        headers=headers_a,
+    )
+    purse_id = create.json()["data"]["id"]
+
+    # Purse belongs to the group, not the creating admin -- a co-admin in
+    # the same group can edit and close it, matching "a new rep inherits
+    # full visibility and control, nothing is orphaned."
+    edit = await client.patch(f"/purses/{purse_id}", json={"amount": "600.00"}, headers=headers_b)
+    assert edit.status_code == 200
+    assert edit.json()["data"]["amount"] == "600.00"
+
+    close = await client.post(f"/purses/{purse_id}/close", headers=headers_b)
+    assert close.status_code == 200
+    assert close.json()["data"]["status"] == "closed"
+
+
 async def test_create_purse_idempotency_key_prevents_duplicate(client, db_session):
     org, group, headers = await _setup_group_with_admin(client, db_session)
     headers_with_key = {**headers, "Idempotency-Key": "test-key-123"}

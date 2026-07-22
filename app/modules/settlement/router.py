@@ -36,8 +36,8 @@ async def lookup_settlement_account(
     monnify: MonnifyClient = Depends(get_monnify_client),
     service: SettlementService = Depends(get_settlement_service),
 ) -> JSONResponse:
-    await _assert_admin_of_group(db, current_user, group_id)
-    result = await service.lookup(monnify, payload.bank_code, payload.account_number)
+    admin = await _assert_admin_of_group(db, current_user, group_id)
+    result = await service.lookup(monnify, admin, payload.bank_code, payload.account_number)
     return success_response(result)
 
 

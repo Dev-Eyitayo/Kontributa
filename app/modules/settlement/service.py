@@ -5,6 +5,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import BusinessRuleError
+from app.modules.audit.models import AuditActorType
+from app.modules.audit.service import AuditService
 from app.modules.group_admins.models import GroupAdmin
 from app.modules.payments.service import MonnifyClient
 from app.modules.settlement.models import SettlementAccount
@@ -17,9 +19,31 @@ def _normalize(name: str) -> str:
 class SettlementService:
     def __init__(self, db: AsyncSession):
         self.db = db
+        self.audit = AuditService(db)
 
-    async def lookup(self, monnify: MonnifyClient, bank_code: str, account_number: str) -> dict:
+    async def lookup(
+        self, monnify: MonnifyClient, admin: GroupAdmin, bank_code: str, account_number: str
+    ) -> dict:
         resolved = await monnify.verify_account_name(account_number, bank_code)
+
+        # Every verification attempt is a meaningful audit fact, even this
+        # preview-only call that saves nothing -- logged and committed on
+        # its own here since nothing else in this request touches the DB.
+        await self.audit.record_event(
+            entity_type="settlement_account",
+            entity_id=admin.group_id,
+            action="lookup_attempted",
+            actor_type=AuditActorType.GROUP_ADMIN,
+            actor_id=admin.id,
+            before_state=None,
+            after_state={
+                "bank_code": bank_code,
+                "account_number": account_number,
+                "resolved_name": resolved.account_name,
+            },
+        )
+        await self.db.commit()
+
         return {
             "account_name": resolved.account_name,
             "bank_code": resolved.bank_code,
@@ -41,6 +65,25 @@ class SettlementService:
         resolved = await monnify.verify_account_name(account_number, bank_code)
 
         if not resolved.account_name or _normalize(resolved.account_name) != _normalize(confirmed_account_name):
+            # A failed verification attempt is itself a meaningful audit
+            # fact, not noise to discard -- committed here on its own since
+            # nothing else in this request is being persisted.
+            await self.audit.record_event(
+                entity_type="settlement_account",
+                entity_id=admin.group_id,
+                action="registration_rejected",
+                actor_type=AuditActorType.GROUP_ADMIN,
+                actor_id=admin.id,
+                before_state=None,
+                after_state={
+                    "bank_code": bank_code,
+                    "account_number": account_number,
+                    "resolved_name": resolved.account_name,
+                    "confirmed_name": confirmed_account_name,
+                    "reason": "account_name_mismatch",
+                },
+            )
+            await self.db.commit()
             # No override path -- a mismatch or failed lookup blocks saving outright.
             raise BusinessRuleError(
                 "confirmed_account_name does not match the name Monnify resolved for this account",
@@ -71,6 +114,16 @@ class SettlementService:
                 created_by_group_admin_id=admin.id,
             )
             self.db.add(account)
+
+        await self.audit.record_event(
+            entity_type="settlement_account",
+            entity_id=admin.group_id,
+            action="registration_saved",
+            actor_type=AuditActorType.GROUP_ADMIN,
+            actor_id=admin.id,
+            before_state=None,
+            after_state={"bank_code": resolved.bank_code, "account_number": resolved.account_number},
+        )
 
         await self.db.commit()
         await self.db.refresh(account)

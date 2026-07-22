@@ -57,7 +57,7 @@ class GroupAdminService:
         members_count = members_count_result.scalar_one()
 
         purses_count_result = await self.db.execute(
-            select(func.count()).select_from(Purse).where(Purse.created_by_group_admin_id == admin.id)
+            select(func.count()).select_from(Purse).where(Purse.group_id == admin.group_id)
         )
         purses_count = purses_count_result.scalar_one()
 

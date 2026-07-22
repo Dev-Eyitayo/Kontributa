@@ -11,8 +11,13 @@ from app.core.db import Base, get_db
 from app.core.redis import get_redis
 from app.core.security import hash_password
 from app.main import app
-from app.modules.payments.schemas import MonnifyInvoice, MonnifyTransactionStatus
-from app.modules.payments.service import get_monnify_client
+from app.modules.payments.schemas import (
+    MonnifyAccountName,
+    MonnifyInvoice,
+    MonnifyTransactionStatus,
+    MonnifyTransferResult,
+)
+from app.modules.payments.service import MonnifyError, get_monnify_client
 
 # Ensure every module's models are registered on Base.metadata before create_all.
 from app.modules.auth import models as _auth_models  # noqa: F401
@@ -23,7 +28,9 @@ from app.modules.invites import models as _invite_models  # noqa: F401
 from app.modules.members import models as _member_models  # noqa: F401
 from app.modules.organizations import models as _org_models  # noqa: F401
 from app.modules.organizations.models import Group, Organization, OrganizationType
+from app.modules.payouts import models as _payout_models  # noqa: F401
 from app.modules.purses import models as _purse_models  # noqa: F401
+from app.modules.settlement import models as _settlement_models  # noqa: F401
 from app.modules.webhooks import models as _webhook_models  # noqa: F401
 
 
@@ -49,6 +56,10 @@ class FakeMonnifyClient:
     def __init__(self):
         self.created_invoices: list[str] = []
         self.transaction_statuses: dict[str, MonnifyTransactionStatus] = {}
+        self.account_names: dict[str, str] = {}
+        self.bank_names: dict[str, str] = {}
+        self.transfers: list[dict] = []
+        self.transfer_should_fail = False
 
     async def create_invoice(
         self, invoice_reference, amount, customer_name, customer_email, description, expires_at
@@ -73,6 +84,29 @@ class FakeMonnifyClient:
             amount_paid=0,
             paid_on=None,
         )
+
+    async def verify_account_name(self, account_number: str, bank_code: str) -> MonnifyAccountName:
+        resolved_name = self.account_names.get(account_number, "Default Resolved Name")
+        return MonnifyAccountName(account_number=account_number, bank_code=bank_code, account_name=resolved_name)
+
+    async def get_bank_name(self, bank_code: str) -> str:
+        return self.bank_names.get(bank_code, "Test Bank")
+
+    async def initiate_single_transfer(
+        self, reference, amount, bank_code, account_number, account_name, narration
+    ) -> MonnifyTransferResult:
+        self.transfers.append(
+            {
+                "reference": reference,
+                "amount": amount,
+                "bank_code": bank_code,
+                "account_number": account_number,
+                "account_name": account_name,
+            }
+        )
+        if self.transfer_should_fail:
+            raise MonnifyError("simulated transfer initiation failure")
+        return MonnifyTransferResult(reference=reference, status="PENDING")
 
 
 @pytest_asyncio.fixture(autouse=True)

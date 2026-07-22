@@ -18,6 +18,7 @@ from app.core.response import success_response
 from app.modules.contributions.service import ContributionService
 from app.modules.group_admins.service import GroupAdminService
 from app.modules.members.service import MemberService
+from app.modules.payouts.service import PayoutService
 from app.modules.purses.schemas import CreatePurseRequest, UpdatePurseRequest
 from app.modules.purses.service import PurseService
 
@@ -226,3 +227,27 @@ async def get_summary(
 
     summary = await contribution_service.summary_for_purse(purse_id)
     return success_response({**summary, "total_collected": str(summary["total_collected"])})
+
+
+@router.get("/{purse_id}/available-balance")
+async def get_available_balance(
+    purse_id: UUID,
+    current_user: CurrentUser = Depends(get_current_group_admin_user),
+    db: AsyncSession = Depends(get_db),
+    purse_service: PurseService = Depends(get_purse_service),
+    admin_service: GroupAdminService = Depends(get_group_admin_service),
+) -> JSONResponse:
+    admin = await admin_service.get_by_user_id(current_user.id)
+    purse = await purse_service.get_by_id(purse_id)
+    if purse.group_id != admin.group_id:
+        raise ForbiddenError("cannot view available balance for a purse outside your group")
+
+    balance = await PayoutService(db).get_available_balance(purse_id)
+    return success_response(
+        {
+            "purse_id": str(balance["purse_id"]),
+            "collected_total": str(balance["collected_total"]),
+            "paid_out_total": str(balance["paid_out_total"]),
+            "available_balance": str(balance["available_balance"]),
+        }
+    )

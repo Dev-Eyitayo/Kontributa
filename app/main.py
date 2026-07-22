@@ -15,7 +15,9 @@ from app.modules.jobs.scheduler import start_scheduler, stop_scheduler
 from app.modules.members.router import router as members_router
 from app.modules.organizations.router import admin_router as organizations_admin_router
 from app.modules.organizations.router import public_router as organizations_public_router
+from app.modules.payouts.router import router as payouts_router
 from app.modules.purses.router import router as purses_router
+from app.modules.settlement.router import router as settlement_router
 from app.modules.webhooks.router import router as webhooks_router
 
 logger = logging.getLogger("kontributa")
@@ -62,6 +64,8 @@ app.include_router(purses_router)
 app.include_router(contributions_router)
 app.include_router(webhooks_router)
 app.include_router(admin_router)
+app.include_router(settlement_router)
+app.include_router(payouts_router)
 
 
 @app.get("/health")

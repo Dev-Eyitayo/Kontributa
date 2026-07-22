@@ -17,6 +17,8 @@ from app.modules.members import models as members_models  # noqa: F401
 from app.modules.purses import models as purses_models  # noqa: F401
 from app.modules.contributions import models as contributions_models  # noqa: F401
 from app.modules.webhooks import models as webhooks_models  # noqa: F401
+from app.modules.settlement import models as settlement_models  # noqa: F401
+from app.modules.payouts import models as payouts_models  # noqa: F401
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

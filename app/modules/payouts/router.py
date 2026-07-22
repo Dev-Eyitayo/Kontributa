@@ -1,0 +1,127 @@
+from typing import Optional
+from uuid import UUID
+
+from fastapi import APIRouter, BackgroundTasks, Depends, Query
+from fastapi.responses import JSONResponse
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+from app.core.auth import CurrentUser, get_current_admin_user, get_current_group_admin_user, get_current_user
+from app.core.db import get_db
+from app.core.exceptions import ForbiddenError
+from app.core.response import success_response
+from app.modules.group_admins.service import GroupAdminService
+from app.modules.payments.service import MonnifyClient, get_monnify_client
+from app.modules.payouts.models import Payout
+from app.modules.payouts.schemas import CreatePayoutRequest, RejectPayoutRequest
+from app.modules.payouts.service import PayoutService, initiate_transfer_for_payout
+
+router = APIRouter(prefix="/payouts", tags=["payouts"])
+
+
+def get_payout_service(db: AsyncSession = Depends(get_db)) -> PayoutService:
+    return PayoutService(db)
+
+
+def get_group_admin_service(db: AsyncSession = Depends(get_db)) -> GroupAdminService:
+    return GroupAdminService(db)
+
+
+def _payout_out(p: Payout) -> dict:
+    return {
+        "id": str(p.id),
+        "group_id": str(p.group_id),
+        "purse_id": str(p.purse_id) if p.purse_id else None,
+        "amount": str(p.amount),
+        "status": p.status.value,
+        "requested_by": str(p.requested_by),
+        "created_at": p.created_at.isoformat(),
+    }
+
+
+@router.post("", status_code=201)
+async def create_payout(
+    payload: CreatePayoutRequest,
+    current_user: CurrentUser = Depends(get_current_group_admin_user),
+    service: PayoutService = Depends(get_payout_service),
+    admin_service: GroupAdminService = Depends(get_group_admin_service),
+) -> JSONResponse:
+    admin = await admin_service.get_by_user_id(current_user.id)
+    payout = await service.create(admin, payload)
+    return success_response(
+        {"id": str(payout.id), "status": payout.status.value, "amount": str(payout.amount)}, status_code=201
+    )
+
+
+@router.get("")
+async def list_payouts(
+    status: Optional[str] = Query(default=None),
+    current_user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    service = PayoutService(db)
+    if current_user.role == "group_admin":
+        admin = await GroupAdminService(db).get_by_user_id(current_user.id)
+        payouts = await service.list_for_group(admin.group_id, status)
+    else:
+        payouts = await service.list_all(status)
+
+    return success_response([_payout_out(p) for p in payouts])
+
+
+@router.get("/{payout_id}")
+async def get_payout(
+    payout_id: UUID,
+    current_user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    service: PayoutService = Depends(get_payout_service),
+) -> JSONResponse:
+    payout = await service.get_by_id(payout_id)
+
+    if current_user.role == "group_admin":
+        admin = await GroupAdminService(db).get_by_user_id(current_user.id)
+        if payout.group_id != admin.group_id:
+            raise ForbiddenError("cannot view another group's payout")
+
+    return success_response(
+        {
+            "id": str(payout.id),
+            "status": payout.status.value,
+            "amount": str(payout.amount),
+            "monnify_transfer_ref": payout.monnify_transfer_ref,
+            "failure_reason": payout.failure_reason,
+        }
+    )
+
+
+@router.post("/{payout_id}/approve")
+async def approve_payout(
+    payout_id: UUID,
+    background_tasks: BackgroundTasks,
+    current_user: CurrentUser = Depends(get_current_admin_user),
+    db: AsyncSession = Depends(get_db),
+    service: PayoutService = Depends(get_payout_service),
+    monnify: MonnifyClient = Depends(get_monnify_client),
+) -> JSONResponse:
+    payout = await service.get_by_id(payout_id)
+    payout = await service.approve_only(payout, current_user.id)
+
+    session_factory = async_sessionmaker(bind=db.bind, expire_on_commit=False)
+    background_tasks.add_task(initiate_transfer_for_payout, payout.id, session_factory, monnify)
+
+    return success_response(
+        {"id": str(payout.id), "status": payout.status.value, "approved_by": str(payout.approved_by)}
+    )
+
+
+@router.post("/{payout_id}/reject")
+async def reject_payout(
+    payout_id: UUID,
+    payload: RejectPayoutRequest,
+    current_user: CurrentUser = Depends(get_current_admin_user),
+    service: PayoutService = Depends(get_payout_service),
+) -> JSONResponse:
+    payout = await service.get_by_id(payout_id)
+    payout = await service.reject(payout, current_user.id, payload.reason)
+    return success_response(
+        {"id": str(payout.id), "status": payout.status.value, "reason": payout.rejection_reason}
+    )

@@ -9,7 +9,12 @@ import httpx
 
 from app.core.config import settings
 from app.core.exceptions import AppException
-from app.modules.payments.schemas import MonnifyInvoice, MonnifyTransactionStatus
+from app.modules.payments.schemas import (
+    MonnifyAccountName,
+    MonnifyInvoice,
+    MonnifyTransactionStatus,
+    MonnifyTransferResult,
+)
 
 
 class MonnifyError(AppException):
@@ -126,6 +131,66 @@ class MonnifyClient:
             payment_status=body.get("paymentStatus", ""),
             amount_paid=Decimal(str(body.get("amountPaid", "0"))),
             paid_on=parse_monnify_datetime(paid_on_raw) if paid_on_raw else None,
+        )
+
+    async def get_bank_name(self, bank_code: str) -> str:
+        """Resolves a bank code to its display name via Monnify's bank
+        reference-data list. Falls back to echoing the code if not found."""
+        banks = await self._request("GET", "/api/v1/banks")
+        if isinstance(banks, dict):
+            banks = banks.get("banks", [])
+        for bank in banks:
+            if bank.get("code") == bank_code:
+                return bank.get("name", bank_code)
+        return bank_code
+
+    async def verify_account_name(self, account_number: str, bank_code: str) -> MonnifyAccountName:
+        """Resolves the real account holder name for a bank/account number --
+        used to preview a settlement account before it's ever saved. This is
+        a read-only lookup; nothing is persisted by calling it."""
+        body = await self._request(
+            "GET",
+            f"/api/v1/disbursements/account/validate?accountNumber={account_number}&bankCode={bank_code}",
+        )
+        return MonnifyAccountName(
+            account_number=body.get("accountNumber", account_number),
+            bank_code=body.get("bankCode", bank_code),
+            account_name=body.get("accountName", ""),
+        )
+
+    async def initiate_single_transfer(
+        self,
+        reference: str,
+        amount: Decimal,
+        bank_code: str,
+        account_number: str,
+        account_name: str,
+        narration: str,
+    ) -> MonnifyTransferResult:
+        """Initiates a disbursement to a verified settlement account.
+
+        Deliberately does not send any parameter that would bypass Monnify's
+        disbursement OTP requirement -- that OTP step, external to this
+        codebase, is a second manual control layered on top of the in-app
+        admin approval gate, and is left exactly as Monnify configures it
+        by default. Do not add one here as a "convenience".
+        """
+        body = await self._request(
+            "POST",
+            "/api/v2/disbursements/single",
+            {
+                "amount": float(amount),
+                "reference": reference,
+                "narration": narration,
+                "destinationBankCode": bank_code,
+                "destinationAccountNumber": account_number,
+                "destinationAccountName": account_name,
+                "currency": "NGN",
+            },
+        )
+        return MonnifyTransferResult(
+            reference=body.get("reference", reference),
+            status=body.get("status", "PENDING"),
         )
 
     @staticmethod

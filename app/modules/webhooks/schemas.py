@@ -11,3 +11,10 @@ class CollectionEventData:
     amount_paid: Decimal
     payment_status: str
     paid_on: Optional[datetime]
+
+
+@dataclass
+class TransferEventData:
+    reference: str
+    success: bool
+    reason: Optional[str]

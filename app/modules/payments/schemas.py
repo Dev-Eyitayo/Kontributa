@@ -20,3 +20,16 @@ class MonnifyTransactionStatus:
     payment_status: str
     amount_paid: Decimal
     paid_on: datetime | None
+
+
+@dataclass
+class MonnifyAccountName:
+    account_number: str
+    bank_code: str
+    account_name: str
+
+
+@dataclass
+class MonnifyTransferResult:
+    reference: str
+    status: str

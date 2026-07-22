@@ -1,6 +1,7 @@
 import enum
 import uuid
 from datetime import datetime
+from decimal import Decimal
 from typing import Optional
 
 from sqlalchemy import DateTime, Enum, ForeignKey, Numeric, String, func
@@ -34,7 +35,7 @@ class Purse(Base):
     )
 
     title: Mapped[str] = mapped_column(String(255), nullable=False)
-    amount: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False)
+    amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
     deadline: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     enroll_mode: Mapped[EnrollMode] = mapped_column(
         Enum(EnrollMode, name="enroll_mode", values_callable=lambda e: [m.value for m in e]),

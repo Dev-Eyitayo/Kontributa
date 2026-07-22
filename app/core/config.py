@@ -18,5 +18,15 @@ class Settings(BaseSettings):
     EMAIL_VERIFICATION_TOKEN_EXPIRE_HOURS: int = 24
     PASSWORD_RESET_TOKEN_EXPIRE_MINUTES: int = 60
 
+    # Sandbox vs live is a config change only -- never a code change.
+    MONNIFY_BASE_URL: str = "https://sandbox.monnify.com"
+    MONNIFY_API_KEY: str = ""
+    MONNIFY_SECRET_KEY: str = ""
+    MONNIFY_CONTRACT_CODE: str = ""
+    MONNIFY_INVOICE_EXPIRY_MINUTES: int = 60
+
+    RECONCILIATION_INTERVAL_MINUTES: int = 20
+    RECONCILIATION_PENDING_THRESHOLD_MINUTES: int = 60
+
 
 settings = Settings()

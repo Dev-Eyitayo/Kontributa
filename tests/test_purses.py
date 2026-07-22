@@ -15,7 +15,7 @@ async def _register_and_login_group_admin(client, email="rep@example.com"):
         },
     )
     verify_token = await find_redis_token("verify_email")
-    await client.post("/auth/verify-email", json={"token": verify_token})
+    await client.post("/auth/verify-email", json={"email": email, "token": verify_token})
     login = await client.post("/auth/login", json={"email": email, "password": "password123"})
     return login.json()["data"]["access_token"]
 
@@ -462,3 +462,142 @@ async def test_invite_link_rejects_closed_purse(client, db_session):
     )
     assert resp.status_code == 422
     assert resp.json()["error"]["code"] == "purse_not_open"
+
+
+async def test_admin_can_manually_add_existing_member_to_snapshot_purse(client, db_session):
+    org, group, headers = await _setup_group_with_admin(client, db_session)
+
+    create = await client.post(
+        "/purses",
+        json={
+            "title": "Backfill Fee",
+            "amount": "750.00",
+            "deadline": _future_deadline(),
+            "enroll_mode": "snapshot",
+        },
+        headers=headers,
+    )
+    purse_id = create.json()["data"]["id"]
+
+    # Member joins the group after the snapshot purse already exists.
+    late_member_headers = await _invite_and_join_member(client, headers, email="late@example.com")
+    member_me = await client.get("/members/me", headers=late_member_headers)
+    member_id = member_me.json()["data"]["id"]
+
+    # Snapshot purse excludes them by default.
+    late_purses = await client.get("/members/me/purses", headers=late_member_headers)
+    assert late_purses.json()["data"] == []
+
+    add = await client.post(
+        f"/purses/{purse_id}/contributions", json={"member_id": member_id}, headers=headers
+    )
+    assert add.status_code == 201
+    body = add.json()["data"]
+    assert body["purse_id"] == purse_id
+    assert body["member_id"] == member_id
+    assert body["status"] == "pending"
+    assert body["amount_expected"] == "750.00"
+
+    late_purses_after = await client.get("/members/me/purses", headers=late_member_headers)
+    assert len(late_purses_after.json()["data"]) == 1
+    assert late_purses_after.json()["data"][0]["purse_id"] == purse_id
+
+
+async def test_add_member_to_purse_rejects_duplicate_enrollment(client, db_session):
+    org, group, headers = await _setup_group_with_admin(client, db_session)
+    member_headers = await _invite_and_join_member(client, headers, email="already-in@example.com")
+    member_me = await client.get("/members/me", headers=member_headers)
+    member_id = member_me.json()["data"]["id"]
+
+    create = await client.post(
+        "/purses",
+        json={"title": "Dues", "amount": "500.00", "deadline": _future_deadline(), "enroll_mode": "snapshot"},
+        headers=headers,
+    )
+    purse_id = create.json()["data"]["id"]
+
+    resp = await client.post(
+        f"/purses/{purse_id}/contributions", json={"member_id": member_id}, headers=headers
+    )
+    assert resp.status_code == 409
+    assert resp.json()["error"]["code"] == "already_enrolled"
+
+
+async def test_add_member_to_purse_rejects_cohort_mismatch(client, db_session):
+    org, group, headers = await _setup_group_with_admin(client, db_session)
+    late_member_headers = await _invite_and_join_member(
+        client, headers, cohort="300", email="wrongcohort@example.com"
+    )
+    member_me = await client.get("/members/me", headers=late_member_headers)
+    member_id = member_me.json()["data"]["id"]
+
+    create = await client.post(
+        "/purses",
+        json={
+            "title": "400L Dues",
+            "amount": "500.00",
+            "deadline": _future_deadline(),
+            "cohort": "400",
+            "enroll_mode": "snapshot",
+        },
+        headers=headers,
+    )
+    purse_id = create.json()["data"]["id"]
+
+    resp = await client.post(
+        f"/purses/{purse_id}/contributions", json={"member_id": member_id}, headers=headers
+    )
+    assert resp.status_code == 422
+    assert resp.json()["error"]["code"] == "cohort_mismatch"
+
+
+async def test_add_member_to_purse_rejects_closed_purse(client, db_session):
+    org, group, headers = await _setup_group_with_admin(client, db_session)
+    late_member_headers = await _invite_and_join_member(client, headers, email="closedpurse@example.com")
+    member_me = await client.get("/members/me", headers=late_member_headers)
+    member_id = member_me.json()["data"]["id"]
+
+    create = await client.post(
+        "/purses",
+        json={"title": "Closed Dues", "amount": "500.00", "deadline": _future_deadline(), "enroll_mode": "snapshot"},
+        headers=headers,
+    )
+    purse_id = create.json()["data"]["id"]
+    await client.post(f"/purses/{purse_id}/close", headers=headers)
+
+    resp = await client.post(
+        f"/purses/{purse_id}/contributions", json={"member_id": member_id}, headers=headers
+    )
+    assert resp.status_code == 422
+    assert resp.json()["error"]["code"] == "purse_not_open"
+
+
+async def test_add_member_to_purse_rejects_member_outside_group(client, db_session):
+    org_a, group_a, headers_a = await _setup_group_with_admin(client, db_session)
+
+    org_b, group_b = await create_org_and_group(
+        db_session, org_name="Other Uni", org_short_code="OU3", group_name="Other Dept", group_short_code="OD3"
+    )
+    admin_b_token = await _register_and_login_group_admin(client, email="repB-outsider@example.com")
+    headers_b = {"Authorization": f"Bearer {admin_b_token}"}
+    await client.post(
+        "/group-admins/onboard",
+        json={"organization_id": str(org_b.id), "group_id": str(group_b.id)},
+        headers=headers_b,
+    )
+
+    other_member_headers = await _invite_and_join_member(client, headers_b, email="outsider@example.com")
+    other_member_me = await client.get("/members/me", headers=other_member_headers)
+    other_member_id = other_member_me.json()["data"]["id"]
+
+    create = await client.post(
+        "/purses",
+        json={"title": "Group A Dues", "amount": "500.00", "deadline": _future_deadline(), "enroll_mode": "snapshot"},
+        headers=headers_a,
+    )
+    purse_id = create.json()["data"]["id"]
+
+    resp = await client.post(
+        f"/purses/{purse_id}/contributions", json={"member_id": other_member_id}, headers=headers_a
+    )
+    assert resp.status_code == 404

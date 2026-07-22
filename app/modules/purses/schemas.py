@@ -1,11 +1,21 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 EnrollModeLiteral = Literal["snapshot", "auto_enroll"]
+
+
+def _assume_utc_if_naive(value: Optional[datetime]) -> Optional[datetime]:
+    # A bare date ("2026-07-24") or a naive datetime string parses to a
+    # tzinfo-less datetime -- comparing that against datetime.now(timezone.utc)
+    # elsewhere raises TypeError instead of the intended validation error.
+    # Treat anything with no offset as UTC rather than rejecting it.
+    if value is not None and value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value
 
 
 class CreatePurseRequest(BaseModel):
@@ -15,10 +25,18 @@ class CreatePurseRequest(BaseModel):
     cohort: Optional[str] = None
     enroll_mode: EnrollModeLiteral
 
+    _normalize_deadline = field_validator("deadline")(_assume_utc_if_naive)
+
 
 class UpdatePurseRequest(BaseModel):
     amount: Optional[Decimal] = Field(default=None, gt=0)
     deadline: Optional[datetime] = None
+
+    _normalize_deadline = field_validator("deadline")(_assume_utc_if_naive)
+
+
+class AddMemberToPurseRequest(BaseModel):
+    member_id: UUID
 
 
 class ContributionListItem(BaseModel):

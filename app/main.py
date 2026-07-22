@@ -5,6 +5,7 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 
 from app.core.exceptions import AppException
+from app.core.logging import configure_logging
 from app.core.response import error_response
 from app.modules.admin.router import router as admin_router
 from app.modules.audit.router import router as audit_router
@@ -21,6 +22,8 @@ from app.modules.payouts.router import router as payouts_router
 from app.modules.purses.router import router as purses_router
 from app.modules.settlement.router import router as settlement_router
 from app.modules.webhooks.router import router as webhooks_router
+
+configure_logging()
 
 logger = logging.getLogger("kontributa")
 

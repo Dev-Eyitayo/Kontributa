@@ -1,6 +1,7 @@
 from uuid import UUID
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import (
@@ -56,7 +57,18 @@ class AuthService:
             role=payload.role,
         )
         self.db.add(user)
-        await self.db.commit()
+        try:
+            await self.db.commit()
+        except IntegrityError:
+            # The pre-check above is a plain read, not a lock -- two
+            # near-simultaneous registrations for the same email can both
+            # pass it before either commits. users.email has a DB-level
+            # unique constraint as the real guarantee; this turns that
+            # constraint violation into the same clean 409 the normal
+            # (non-racing) path already returns, instead of an unhandled
+            # IntegrityError bubbling up as a 500.
+            await self.db.rollback()
+            raise ConflictError("an account with this email already exists", code="duplicate_email")
         await self.db.refresh(user)
 
         token = await self.verify_email_tokens.issue(user.id)
@@ -68,20 +80,55 @@ class AuthService:
             context={
                 "first_name": user.first_name,
                 "verification_token": token,
-                "expires_in_hours": settings.EMAIL_VERIFICATION_TOKEN_EXPIRE_HOURS,
+                "expires_in_minutes": settings.EMAIL_VERIFICATION_TOKEN_EXPIRE_MINUTES,
             },
         )
         return user
 
-    async def verify_email(self, token: str) -> bool:
-        user_id = await self.verify_email_tokens.consume(token)
+    async def resend_verification(self, email: str) -> None:
+        """Mirrors forgot_password's enumeration-safe shape: silently no-ops
+        for an unknown email OR an already-verified one, rather than
+        revealing which case applies. The original register() token isn't
+        invalidated -- SingleUseTokenStore.issue() just hands out a fresh
+        one; either token still works until whichever is used first (or
+        both expire)."""
+        user = await self._get_by_email(email)
+        if user is None or user.is_verified:
+            return
+
+        token = await self.verify_email_tokens.issue(user.id)
+        await self.notifications.send(
+            to_email=user.email,
+            to_name=f"{user.first_name} {user.last_name}",
+            template_name="verify_email.html",
+            subject="Verify your Kontributa account",
+            context={
+                "first_name": user.first_name,
+                "verification_token": token,
+                "expires_in_minutes": settings.EMAIL_VERIFICATION_TOKEN_EXPIRE_MINUTES,
+            },
+        )
+
+    async def verify_email(self, email: str, token: str) -> bool:
+        # Peek rather than consume up front: a code presented with the
+        # wrong email shouldn't burn a code that's still legitimately
+        # usable by its real owner (e.g. a simple typo in the email field).
+        # It's only actually consumed once the email check below passes.
+        user_id = await self.verify_email_tokens.peek(token)
         if user_id is None:
             raise AuthError("invalid or expired verification token", code="token_invalid")
 
         user = await self.db.get(User, user_id)
-        if user is None:
-            raise NotFoundError("user not found")
+        # Same error for "no such user" and "right code, wrong email" --
+        # codes are looked up globally (not scoped per-email in redis), so
+        # this cross-check is what actually stops someone from consuming a
+        # code that was issued to a different account. Folding both cases
+        # into one generic message avoids confirming a code is valid but
+        # tied to some other address.
+        if user is None or user.email != email:
+            raise AuthError("invalid or expired verification token", code="token_invalid")
 
+        await self.verify_email_tokens.delete(token)
         user.is_verified = True
         await self.db.commit()
         return True

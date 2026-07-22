@@ -1,4 +1,6 @@
-from tests.conftest import find_redis_token
+import asyncio
+
+from tests.conftest import _state, find_redis_token
 
 
 async def _register(client, email="member1@example.com", role="member", password="password123"):
@@ -37,18 +39,96 @@ async def test_register_duplicate_email_error_envelope(client):
     assert body["error"]["code"] == "duplicate_email"
 
 
+async def test_simultaneous_duplicate_registration_returns_clean_409(client):
+    # Both requests read "no existing user" before either commits -- the
+    # real guarantee is the DB's unique constraint on users.email, caught
+    # as an IntegrityError and turned into the same 409 the sequential
+    # (non-racing) path returns, not an unhandled 500.
+    payload = {
+        "email": "race-condition@example.com",
+        "password": "password123",
+        "first_name": "Race",
+        "last_name": "Condition",
+        "role": "member",
+    }
+    results = await asyncio.gather(
+        client.post("/auth/register", json=payload),
+        client.post("/auth/register", json=payload),
+    )
+
+    statuses = sorted(r.status_code for r in results)
+    assert statuses == [201, 409]
+
+    loser = next(r for r in results if r.status_code == 409)
+    assert loser.json()["error"]["code"] == "duplicate_email"
+
+
 async def test_verify_email_success(client):
     await _register(client, email="verifyme@example.com")
     token = await find_redis_token("verify_email")
 
-    resp = await client.post("/auth/verify-email", json={"token": token})
+    resp = await client.post("/auth/verify-email", json={"email": "verifyme@example.com", "token": token})
     assert resp.status_code == 200
     assert resp.json()["data"]["verified"] is True
 
     # token is single-use
-    resp2 = await client.post("/auth/verify-email", json={"token": token})
+    resp2 = await client.post("/auth/verify-email", json={"email": "verifyme@example.com", "token": token})
     assert resp2.status_code == 401
     assert resp2.json()["error"]["code"] == "token_invalid"
+
+
+async def test_verify_email_rejects_code_for_a_different_email(client):
+    await _register(client, email="owner@example.com")
+    token = await find_redis_token("verify_email")
+
+    # A valid, unexpired code -- but presented with someone else's email.
+    resp = await client.post("/auth/verify-email", json={"email": "not-the-owner@example.com", "token": token})
+    assert resp.status_code == 401
+    assert resp.json()["error"]["code"] == "token_invalid"
+
+    # The real owner can still use it -- the mismatched attempt didn't burn it early.
+    resp2 = await client.post("/auth/verify-email", json={"email": "owner@example.com", "token": token})
+    assert resp2.status_code == 200
+    assert resp2.json()["data"]["verified"] is True
+
+
+async def test_resend_verification_issues_a_new_working_token(client):
+    await _register(client, email="lost-my-token@example.com")
+    first_token = await find_redis_token("verify_email")
+
+    resend = await client.post("/auth/resend-verification", json={"email": "lost-my-token@example.com"})
+    assert resend.status_code == 200
+    assert resend.json()["success"] is True
+
+    # resend doesn't invalidate the original token (either one still works
+    # until whichever is used first, or both expire), so both keys coexist
+    # in redis now -- find the new one specifically.
+    keys = await _state["redis"].keys("verify_email:*")
+    second_token = next(k.split(":", 1)[1] for k in keys if k.split(":", 1)[1] != first_token)
+
+    verify = await client.post("/auth/verify-email", json={"token": second_token})
+    assert verify.status_code == 200
+    assert verify.json()["data"]["verified"] is True
+
+
+async def test_resend_verification_unknown_email_still_returns_200(client):
+    resp = await client.post("/auth/resend-verification", json={"email": "nobody@example.com"})
+    assert resp.status_code == 200
+    assert resp.json()["success"] is True
+
+
+async def test_resend_verification_already_verified_is_a_silent_noop(client):
+    await _register(client, email="already-verified@example.com")
+    token = await find_redis_token("verify_email")
+    await client.post("/auth/verify-email", json={"token": token})
+
+    resp = await client.post("/auth/resend-verification", json={"email": "already-verified@example.com"})
+    assert resp.status_code == 200
+
+    # No new token should have been issued -- the redis key from the first
+    # (already-consumed) token is gone, and nothing new was written.
+    keys = await _state["redis"].keys("verify_email:*")
+    assert keys == []
 
 
 async def test_login_success_and_invalid_credentials(client):

@@ -6,6 +6,7 @@ class Settings(BaseSettings):
 
     ENV: str = "development"
     APP_BASE_URL: str = "http://localhost:8000"
+    LOG_LEVEL: str = "INFO"
 
     # Superuser connection -- used only for migrations and test schema bootstrap
     # (DDL, and granting/revoking the runtime role's privileges below).
@@ -27,7 +28,7 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
     REFRESH_TOKEN_EXPIRE_DAYS: int = 30
 
-    EMAIL_VERIFICATION_TOKEN_EXPIRE_HOURS: int = 24
+    EMAIL_VERIFICATION_TOKEN_EXPIRE_MINUTES: int = 15
     PASSWORD_RESET_TOKEN_EXPIRE_MINUTES: int = 60
 
     # Sandbox vs live is a config change only -- never a code change.
@@ -62,6 +63,13 @@ class Settings(BaseSettings):
     RATE_LIMIT_REGISTER_PER_HOUR: int = 10
     RATE_LIMIT_FORGOT_PASSWORD_PER_HOUR: int = 5
     RATE_LIMIT_REMIND_PER_MINUTE: int = 3
+
+    # Consumption-side caps: verify-email and reset-password now take a
+    # 6-digit code (1,000,000 possibilities, no lockout otherwise) rather
+    # than a long opaque token -- without a guess limit here, that's brute
+    # forceable within a code's TTL window with a plain script.
+    RATE_LIMIT_VERIFY_EMAIL_PER_HOUR: int = 20
+    RATE_LIMIT_RESET_PASSWORD_PER_HOUR: int = 20
 
 
 settings = Settings()

@@ -6,9 +6,16 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.exceptions import BusinessRuleError, ForbiddenError, NotFoundError, ValidationAppError
+from app.core.exceptions import (
+    BusinessRuleError,
+    ConflictError,
+    ForbiddenError,
+    NotFoundError,
+    ValidationAppError,
+)
 from app.modules.audit.models import AuditActorType
 from app.modules.audit.service import AuditService
+from app.modules.contributions.models import Contribution
 from app.modules.contributions.service import ContributionService
 from app.modules.group_admins.models import GroupAdmin
 from app.modules.members.models import Member
@@ -108,6 +115,49 @@ class PurseService:
         await self.db.commit()
         await self.db.refresh(purse)
         return purse
+
+    async def add_member(self, admin: GroupAdmin, purse_id: UUID, member_id: UUID) -> Contribution:
+        """Manually backfills a single existing member onto a purse they
+        weren't swept into -- e.g. a snapshot purse created before they
+        joined, or a cohort mismatch at generation time. The automatic paths
+        (generate_for_purse at creation, generate_for_new_member on join)
+        only ever run once per member per purse, so this is the only way to
+        add someone after the fact without a purse-scoped invite link."""
+        purse = await self.get_by_id(purse_id)
+        self._assert_group_scoped(admin, purse)
+
+        if purse.status != PurseStatus.OPEN:
+            raise BusinessRuleError("only an open purse can have members added", code="purse_not_open")
+
+        member = await self.db.get(Member, member_id)
+        if member is None or member.group_id != purse.group_id:
+            raise NotFoundError("member not found in this group")
+
+        if purse.cohort is not None and member.cohort != purse.cohort:
+            raise BusinessRuleError(
+                "member's cohort does not match this purse's cohort", code="cohort_mismatch"
+            )
+
+        existing = await self.contributions.get_for_member(purse.id, member.id)
+        if existing is not None:
+            raise ConflictError("member is already enrolled in this purse", code="already_enrolled")
+
+        contribution = Contribution(purse_id=purse.id, member_id=member.id, amount_expected=purse.amount)
+        self.db.add(contribution)
+        await self.db.commit()
+        await self.db.refresh(contribution)
+
+        await self.audit.record_event(
+            entity_type="contribution",
+            entity_id=contribution.id,
+            action="member_added_to_purse",
+            actor_type=AuditActorType.GROUP_ADMIN,
+            actor_id=admin.id,
+            before_state=None,
+            after_state={"purse_id": str(purse.id), "member_id": str(member.id)},
+        )
+
+        return contribution
 
     async def list_for_admin(self, admin: GroupAdmin, status: Optional[str] = None) -> list[Purse]:
         stmt = select(Purse).where(Purse.group_id == admin.group_id)

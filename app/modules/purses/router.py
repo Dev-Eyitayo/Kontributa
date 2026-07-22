@@ -20,7 +20,7 @@ from app.modules.contributions.service import ContributionService
 from app.modules.group_admins.service import GroupAdminService
 from app.modules.members.service import MemberService
 from app.modules.payouts.service import PayoutService
-from app.modules.purses.schemas import CreatePurseRequest, UpdatePurseRequest
+from app.modules.purses.schemas import AddMemberToPurseRequest, CreatePurseRequest, UpdatePurseRequest
 from app.modules.purses.service import PurseService
 
 router = APIRouter(prefix="/purses", tags=["purses"])
@@ -211,6 +211,28 @@ async def list_contributions(
             }
             for contribution, member, user in rows
         ]
+    )
+
+
+@router.post("/{purse_id}/contributions", status_code=201)
+async def add_member_to_purse(
+    purse_id: UUID,
+    payload: AddMemberToPurseRequest,
+    current_user: CurrentUser = Depends(get_current_group_admin_user),
+    purse_service: PurseService = Depends(get_purse_service),
+    admin_service: GroupAdminService = Depends(get_group_admin_service),
+) -> JSONResponse:
+    admin = await admin_service.get_by_user_id(current_user.id)
+    contribution = await purse_service.add_member(admin, purse_id, payload.member_id)
+    return success_response(
+        {
+            "id": str(contribution.id),
+            "purse_id": str(contribution.purse_id),
+            "member_id": str(contribution.member_id),
+            "status": contribution.status.value,
+            "amount_expected": str(contribution.amount_expected),
+        },
+        status_code=201,
     )
 
 

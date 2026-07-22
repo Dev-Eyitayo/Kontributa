@@ -3,6 +3,7 @@ from typing import Optional
 from uuid import UUID
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import SingleUseTokenStore
@@ -99,7 +100,17 @@ class MemberService:
             invite_source=invite.id,
         )
         self.db.add(member)
-        await self.db.commit()
+        try:
+            await self.db.commit()
+        except IntegrityError:
+            # Same check-then-insert race as AuthService.register(): two
+            # near-simultaneous joins with the same new email (users.email
+            # unique) or somehow racing the same user into two Member rows
+            # (members.user_id unique) both hit their real guarantee at the
+            # DB constraint, not the read above. Turn that into the same
+            # clean 409 the non-racing path already returns.
+            await self.db.rollback()
+            raise ConflictError("email already registered", code="duplicate_email")
         await self.db.refresh(member)
 
         await self.invites.redeem(token)
@@ -121,7 +132,7 @@ class MemberService:
                 context={
                     "first_name": user.first_name,
                     "verification_token": verify_token,
-                    "expires_in_hours": settings.EMAIL_VERIFICATION_TOKEN_EXPIRE_HOURS,
+                    "expires_in_minutes": settings.EMAIL_VERIFICATION_TOKEN_EXPIRE_MINUTES,
                 },
             )
 

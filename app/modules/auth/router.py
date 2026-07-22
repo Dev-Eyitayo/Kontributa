@@ -23,6 +23,7 @@ from app.modules.auth.schemas import (
     LogoutRequest,
     RefreshTokenRequest,
     RegisterRequest,
+    ResendVerificationRequest,
     ResetPasswordRequest,
     VerifyEmailRequest,
 )
@@ -70,12 +71,30 @@ async def register(payload: RegisterRequest, service: AuthService = Depends(get_
     )
 
 
-@router.post("/verify-email")
+@router.post(
+    "/verify-email",
+    dependencies=[
+        Depends(rate_limit_by_ip("auth:verify-email", settings.RATE_LIMIT_VERIFY_EMAIL_PER_HOUR, 3600))
+    ],
+)
 async def verify_email(
     payload: VerifyEmailRequest, service: AuthService = Depends(get_auth_service)
 ) -> JSONResponse:
-    verified = await service.verify_email(payload.token)
+    verified = await service.verify_email(payload.email, payload.token)
     return success_response({"verified": verified})
+
+
+@router.post(
+    "/resend-verification",
+    dependencies=[
+        Depends(rate_limit_by_ip("auth:resend-verification", settings.RATE_LIMIT_FORGOT_PASSWORD_PER_HOUR, 3600))
+    ],
+)
+async def resend_verification(
+    payload: ResendVerificationRequest, service: AuthService = Depends(get_auth_service)
+) -> JSONResponse:
+    await service.resend_verification(payload.email)
+    return success_response({"message": "verification email sent if account exists and is unverified"})
 
 
 @router.post("/login")
@@ -115,7 +134,12 @@ async def forgot_password(
     return success_response({"message": "reset link sent if account exists"})
 
 
-@router.post("/reset-password")
+@router.post(
+    "/reset-password",
+    dependencies=[
+        Depends(rate_limit_by_ip("auth:reset-password", settings.RATE_LIMIT_RESET_PASSWORD_PER_HOUR, 3600))
+    ],
+)
 async def reset_password(
     payload: ResetPasswordRequest, service: AuthService = Depends(get_auth_service)
 ) -> JSONResponse:

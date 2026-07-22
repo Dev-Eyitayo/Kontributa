@@ -32,7 +32,7 @@ async def _register_and_login_group_admin(client, email="rep@example.com"):
         },
     )
     verify_token = await find_redis_token("verify_email")
-    await client.post("/auth/verify-email", json={"token": verify_token})
+    await client.post("/auth/verify-email", json={"email": email, "token": verify_token})
     login = await client.post("/auth/login", json={"email": email, "password": "password123"})
     return login.json()["data"]["access_token"]
 
@@ -43,7 +43,7 @@ async def _register_and_login_member(client, token, email, first_name="Ada", las
         json={"email": email, "password": "password123", "first_name": first_name, "last_name": last_name},
     )
     verify_token = await find_redis_token("verify_email")
-    await client.post("/auth/verify-email", json={"token": verify_token})
+    await client.post("/auth/verify-email", json={"email": email, "token": verify_token})
     login = await client.post("/auth/login", json={"email": email, "password": "password123"})
     return login.json()["data"]["access_token"]
 

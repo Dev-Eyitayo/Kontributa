@@ -169,6 +169,10 @@ def get_refresh_token_service(redis: Redis = Depends(get_redis)) -> RefreshToken
 # ---------------------------------------------------------------------------
 
 
+def _generate_numeric_code() -> str:
+    return f"{secrets.randbelow(1_000_000):06d}"
+
+
 class SingleUseTokenStore:
     def __init__(self, redis: Redis, prefix: str, ttl: timedelta):
         self._redis = redis
@@ -179,9 +183,20 @@ class SingleUseTokenStore:
         return f"{self._prefix}:{token}"
 
     async def issue(self, user_id: UUID) -> str:
-        token = secrets.token_urlsafe(32)
-        await self._redis.set(self._key(token), str(user_id), ex=int(self._ttl.total_seconds()))
-        return token
+        # A 6-digit code only has 1,000,000 possible values -- at any real
+        # volume within a 24h TTL window, two users could plausibly land on
+        # the same code (birthday paradox, not a paranoid edge case here).
+        # `nx=True` means a collision is simply never written over someone
+        # else's pending code; it retries with a fresh code instead of
+        # silently reassigning their code to this user.
+        for _ in range(5):
+            token = _generate_numeric_code()
+            reserved = await self._redis.set(
+                self._key(token), str(user_id), ex=int(self._ttl.total_seconds()), nx=True
+            )
+            if reserved:
+                return token
+        raise RuntimeError("failed to issue a unique single-use code after 5 attempts")
 
     async def consume(self, token: str) -> Optional[UUID]:
         key = self._key(token)
@@ -193,10 +208,22 @@ class SingleUseTokenStore:
             return None
         return UUID(raw)
 
+    async def peek(self, token: str) -> Optional[UUID]:
+        """Reads without consuming -- lets a caller validate extra context
+        (e.g. the code belongs to the claimed email) before deciding
+        whether this attempt should actually burn the code."""
+        raw = await self._redis.get(self._key(token))
+        if raw is None:
+            return None
+        return UUID(raw)
+
+    async def delete(self, token: str) -> None:
+        await self._redis.delete(self._key(token))
+
 
 def get_email_verification_token_store(redis: Redis = Depends(get_redis)) -> SingleUseTokenStore:
     return SingleUseTokenStore(
-        redis, "verify_email", timedelta(hours=settings.EMAIL_VERIFICATION_TOKEN_EXPIRE_HOURS)
+        redis, "verify_email", timedelta(minutes=settings.EMAIL_VERIFICATION_TOKEN_EXPIRE_MINUTES)
     )
 
 

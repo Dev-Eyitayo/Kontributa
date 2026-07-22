@@ -22,11 +22,20 @@ class RegisterResponse(BaseModel):
 
 
 class VerifyEmailRequest(BaseModel):
+    email: EmailStr
     token: str
 
 
 class VerifyEmailResponse(BaseModel):
     verified: bool
+
+
+class ResendVerificationRequest(BaseModel):
+    email: EmailStr
+
+
+class ResendVerificationResponse(BaseModel):
+    message: str = "verification email sent if account exists and is unverified"
 
 
 class LoginRequest(BaseModel):

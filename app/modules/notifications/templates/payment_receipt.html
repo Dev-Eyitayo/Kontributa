@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}Payment received -- {{ purse_title }}{% endblock %}
+{% block content %}
+<p>Hi {{ first_name }},</p>
+<p>We've confirmed your payment for <strong>{{ purse_title }}</strong>.</p>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:16px 0;">
+<tr><td style="color:#6b7280;">Amount</td><td align="right"><strong>&#8358;{{ amount }}</strong></td></tr>
+<tr><td style="color:#6b7280;">Confirmed at</td><td align="right">{{ paid_at }}</td></tr>
+</table>
+<p>Keep this email as your receipt.</p>
+{% endblock %}

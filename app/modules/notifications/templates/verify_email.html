@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+{% block title %}Verify your Kontributa account{% endblock %}
+{% block content %}
+<p>Hi {{ first_name }},</p>
+<p>Thanks for signing up. Use the verification code below to confirm your email address:</p>
+<p style="font-size:22px;font-weight:bold;letter-spacing:2px;background-color:#f3f4f6;padding:12px 16px;border-radius:6px;text-align:center;">{{ verification_token }}</p>
+<p>This code expires in {{ expires_in_hours }} hours.</p>
+{% endblock %}

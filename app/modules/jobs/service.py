@@ -9,13 +9,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.modules.contributions.models import ActorType, Contribution, ContributionStatus
 from app.modules.contributions.service import ContributionService
+from app.modules.notifications.service import NotificationService
 from app.modules.payments.service import MonnifyClient, MonnifyError
 
 logger = logging.getLogger("kontributa.reconciliation")
 
 
 async def run_reconciliation(
-    db: AsyncSession, monnify: MonnifyClient, purse_id: Optional[UUID] = None
+    db: AsyncSession,
+    monnify: MonnifyClient,
+    purse_id: Optional[UUID] = None,
+    notifications: Optional[NotificationService] = None,
 ) -> tuple[int, int]:
     """Finds every Contribution still pending past a safe threshold and
     queries Monnify's transaction status directly for each -- covers a
@@ -51,7 +55,7 @@ async def run_reconciliation(
     for contribution in contributions:
         checked += 1
 
-        contribution = await contribution_service.expire_if_needed(contribution)
+        contribution = await contribution_service.expire_if_needed(contribution, notifications)
         if contribution.status != ContributionStatus.PENDING:
             updated += 1
             continue
@@ -71,6 +75,7 @@ async def run_reconciliation(
             tx_status.paid_on,
             ActorType.RECONCILIATION_JOB,
             "Reconciliation job",
+            notifications,
         )
         if result is not None:
             updated += 1

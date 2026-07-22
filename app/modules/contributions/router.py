@@ -16,6 +16,7 @@ from app.modules.contributions.service import ContributionService
 from app.modules.group_admins.service import GroupAdminService
 from app.modules.members.models import Member
 from app.modules.members.service import MemberService
+from app.modules.notifications.service import NotificationService, SendByteClient, get_sendbyte_client
 from app.modules.payments.service import MonnifyClient, get_monnify_client
 from app.modules.purses.models import Purse
 
@@ -80,6 +81,7 @@ async def generate_invoice(
     db: AsyncSession = Depends(get_db),
     service: ContributionService = Depends(get_contribution_service),
     monnify: MonnifyClient = Depends(get_monnify_client),
+    sendbyte: SendByteClient = Depends(get_sendbyte_client),
 ) -> JSONResponse:
     if current_user.role != "member":
         raise ForbiddenError("only a member can generate an invoice for their own contribution")
@@ -89,7 +91,8 @@ async def generate_invoice(
     member_user = await db.get(User, member.user_id)
     purse = await db.get(Purse, contribution.purse_id)
 
-    contribution = await service.generate_invoice(contribution, monnify, member, member_user, purse)
+    notifications = NotificationService(db, sendbyte)
+    contribution = await service.generate_invoice(contribution, monnify, member, member_user, purse, notifications)
 
     return success_response(
         {

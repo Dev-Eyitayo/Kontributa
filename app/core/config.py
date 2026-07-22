@@ -40,5 +40,23 @@ class Settings(BaseSettings):
     RECONCILIATION_INTERVAL_MINUTES: int = 20
     RECONCILIATION_PENDING_THRESHOLD_MINUTES: int = 60
 
+    # Sandbox vs live is a config change only -- same pattern as Monnify above.
+    SENDBYTE_BASE_URL: str = "https://api.sendbyte.africa"
+    SENDBYTE_API_KEY: str = ""
+    SENDBYTE_FROM_EMAIL: str = "noreply@kontributa.app"
+    SENDBYTE_FROM_NAME: str = "Kontributa"
+
+    # Global kill switch for the /purses/{id}/remind feature -- flip to False
+    # via env var to stop reminder sends platform-wide without a code change.
+    REMINDERS_ENABLED: bool = True
+    REMINDER_MIN_INTERVAL_DAYS: int = 7
+
+    # Fixed-window request caps on the endpoints that can trigger a SendByte
+    # send, so a burst of traffic (or abuse) can't quietly exhaust the free
+    # tier. Deliberately conservative defaults; raise via env var if needed.
+    RATE_LIMIT_REGISTER_PER_HOUR: int = 10
+    RATE_LIMIT_FORGOT_PASSWORD_PER_HOUR: int = 5
+    RATE_LIMIT_REMIND_PER_MINUTE: int = 3
+
 
 settings = Settings()

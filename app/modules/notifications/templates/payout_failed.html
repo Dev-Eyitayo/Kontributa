@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+{% block title %}Payout failed{% endblock %}
+{% block content %}
+<p>Hi {{ first_name }},</p>
+<p>A payout of <strong>&#8358;{{ amount }}</strong> for {{ group_name }} could not be completed.</p>
+<p style="color:#6b7280;">Reason: {{ failure_reason }}</p>
+<p>The funds never left the platform wallet and remain available -- you can submit a new payout request whenever you're ready.</p>
+{% endblock %}

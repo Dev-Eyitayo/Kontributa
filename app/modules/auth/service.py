@@ -9,7 +9,7 @@ from app.core.auth import (
     SingleUseTokenStore,
     create_access_token,
 )
-from app.core.email import send_email
+from app.core.config import settings
 from app.core.exceptions import AuthError, ConflictError, NotFoundError
 from app.core.security import hash_password, verify_password
 from app.modules.auth.models import User
@@ -19,6 +19,7 @@ from app.modules.auth.schemas import (
     RegisterRequest,
     ResetPasswordRequest,
 )
+from app.modules.notifications.service import NotificationService
 
 
 class AuthService:
@@ -29,12 +30,14 @@ class AuthService:
         blacklist: AccessTokenBlacklist,
         verify_email_tokens: SingleUseTokenStore,
         reset_password_tokens: SingleUseTokenStore,
+        notifications: NotificationService,
     ):
         self.db = db
         self.refresh_tokens = refresh_tokens
         self.blacklist = blacklist
         self.verify_email_tokens = verify_email_tokens
         self.reset_password_tokens = reset_password_tokens
+        self.notifications = notifications
 
     async def _get_by_email(self, email: str) -> User | None:
         result = await self.db.execute(select(User).where(User.email == email))
@@ -57,10 +60,16 @@ class AuthService:
         await self.db.refresh(user)
 
         token = await self.verify_email_tokens.issue(user.id)
-        await send_email(
-            to=user.email,
+        await self.notifications.send(
+            to_email=user.email,
+            to_name=f"{user.first_name} {user.last_name}",
+            template_name="verify_email.html",
             subject="Verify your Kontributa account",
-            body=f"Your verification token is: {token}",
+            context={
+                "first_name": user.first_name,
+                "verification_token": token,
+                "expires_in_hours": settings.EMAIL_VERIFICATION_TOKEN_EXPIRE_HOURS,
+            },
         )
         return user
 
@@ -105,10 +114,16 @@ class AuthService:
         if user is None:
             return
         token = await self.reset_password_tokens.issue(user.id)
-        await send_email(
-            to=user.email,
+        await self.notifications.send(
+            to_email=user.email,
+            to_name=f"{user.first_name} {user.last_name}",
+            template_name="password_reset.html",
             subject="Reset your Kontributa password",
-            body=f"Your password reset token is: {token}",
+            context={
+                "first_name": user.first_name,
+                "reset_token": token,
+                "expires_in_minutes": settings.PASSWORD_RESET_TOKEN_EXPIRE_MINUTES,
+            },
         )
 
     async def reset_password(self, payload: ResetPasswordRequest) -> None:

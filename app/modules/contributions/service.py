@@ -14,6 +14,7 @@ from app.modules.auth.models import User
 from app.modules.contributions.models import ActorType, Contribution, ContributionEvent, ContributionStatus
 from app.modules.group_admins.models import GroupAdmin
 from app.modules.members.models import Member
+from app.modules.notifications.service import NotificationService
 from app.modules.payments.service import MonnifyClient
 from app.modules.purses.models import EnrollMode, Purse, PurseStatus
 
@@ -222,12 +223,34 @@ class ContributionService:
             after_state={"status": to_status.value, "note": note},
         )
 
-    async def expire_if_needed(self, contribution: Contribution) -> Contribution:
+    async def _notify_member(
+        self, contribution: Contribution, notifications: NotificationService, template_name: str, subject: str, context: dict
+    ) -> None:
+        member = await self.db.get(Member, contribution.member_id)
+        user = await self.db.get(User, member.user_id) if member is not None else None
+        if user is None:
+            return
+        await notifications.send(
+            to_email=user.email,
+            to_name=f"{user.first_name} {user.last_name}",
+            template_name=template_name,
+            subject=subject,
+            context={"first_name": user.first_name, **context},
+        )
+
+    async def expire_if_needed(
+        self, contribution: Contribution, notifications: Optional[NotificationService] = None
+    ) -> Contribution:
         """Lazily applies the pending -> expired transition once the stored
         invoice's validity window has lapsed. Phase 4's scheduled
         reconciliation job calls this same helper on a timer; here it runs
         on-demand (e.g. right before generate-invoice decides whether to
-        reuse or replace the current invoice)."""
+        reuse or replace the current invoice).
+
+        `notifications` is optional and skipped entirely when None -- only
+        callers that explicitly wire a NotificationService trigger the
+        expiry-notice email; this keeps email sending opt-in per call site
+        rather than a hidden side effect of calling this method."""
         if (
             contribution.status == ContributionStatus.PENDING
             and contribution.invoice_expires_at is not None
@@ -244,6 +267,20 @@ class ContributionService:
             contribution.status = ContributionStatus.EXPIRED
             await self.db.commit()
             await self.db.refresh(contribution)
+
+            if notifications is not None:
+                purse = await self.db.get(Purse, contribution.purse_id)
+                if purse is not None:
+                    await self._notify_member(
+                        contribution,
+                        notifications,
+                        "contribution_expired.html",
+                        f"Your invoice for {purse.title} expired",
+                        {
+                            "purse_title": purse.title,
+                            "amount": str(contribution.amount_expected - contribution.amount_received),
+                        },
+                    )
         return contribution
 
     async def generate_invoice(
@@ -253,8 +290,9 @@ class ContributionService:
         member: Member,
         member_user: User,
         purse: Purse,
+        notifications: Optional[NotificationService] = None,
     ) -> Contribution:
-        contribution = await self.expire_if_needed(contribution)
+        contribution = await self.expire_if_needed(contribution, notifications)
 
         now = datetime.now(timezone.utc)
         has_live_invoice = (
@@ -315,6 +353,7 @@ class ContributionService:
         paid_on: Optional[datetime],
         actor_type: ActorType,
         note_prefix: str,
+        notifications: Optional[NotificationService] = None,
     ) -> Optional[Contribution]:
         """The single place that decides how a payment confirmation --
         whether from a Monnify webhook or the reconciliation job polling
@@ -344,6 +383,22 @@ class ContributionService:
         await self._write_event(contribution, from_status, contribution.status, actor_type, None, note)
         await self.db.commit()
         await self.db.refresh(contribution)
+
+        if notifications is not None and contribution.status == ContributionStatus.PAID:
+            purse = await self.db.get(Purse, contribution.purse_id)
+            if purse is not None:
+                await self._notify_member(
+                    contribution,
+                    notifications,
+                    "payment_receipt.html",
+                    f"Payment received -- {purse.title}",
+                    {
+                        "purse_title": purse.title,
+                        "amount": str(contribution.amount_received),
+                        "paid_at": contribution.paid_at.isoformat() if contribution.paid_at else "",
+                    },
+                )
+
         return contribution
 
     async def mark_manual(self, contribution: Contribution, admin: GroupAdmin, amount_received: Decimal, note: str) -> Contribution:

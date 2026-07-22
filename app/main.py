@@ -14,6 +14,7 @@ from app.modules.group_admins.router import router as group_admins_router
 from app.modules.invites.router import router as invites_router
 from app.modules.jobs.scheduler import start_scheduler, stop_scheduler
 from app.modules.members.router import router as members_router
+from app.modules.notifications.router import router as notifications_router
 from app.modules.organizations.router import admin_router as organizations_admin_router
 from app.modules.organizations.router import public_router as organizations_public_router
 from app.modules.payouts.router import router as payouts_router
@@ -62,6 +63,7 @@ app.include_router(group_admins_router)
 app.include_router(invites_router)
 app.include_router(members_router)
 app.include_router(purses_router)
+app.include_router(notifications_router)
 app.include_router(contributions_router)
 app.include_router(webhooks_router)
 app.include_router(admin_router)

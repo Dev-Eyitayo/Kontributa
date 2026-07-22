@@ -10,8 +10,10 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.core.exceptions import BusinessRuleError, ConflictError, ForbiddenError, NotFoundError
 from app.modules.audit.models import AuditActorType
 from app.modules.audit.service import AuditService
+from app.modules.auth.models import User
 from app.modules.contributions.models import Contribution, ContributionStatus
 from app.modules.group_admins.models import GroupAdmin
+from app.modules.notifications.service import NotificationService, SendByteClient
 from app.modules.organizations.models import Group
 from app.modules.payments.service import MonnifyClient, MonnifyError
 from app.modules.payouts.models import Payout, PayoutActorType, PayoutAllocation, PayoutEvent, PayoutStatus
@@ -319,7 +321,9 @@ class PayoutService:
         await self.db.refresh(payout)
         return payout
 
-    async def mark_transfer_initiation_failed(self, payout_id: UUID, reason: str) -> Optional[Payout]:
+    async def mark_transfer_initiation_failed(
+        self, payout_id: UUID, reason: str, notifications: Optional[NotificationService] = None
+    ) -> Optional[Payout]:
         payout = await self.db.get(Payout, payout_id)
         if payout is None or payout.status != PayoutStatus.APPROVED:
             return None
@@ -332,10 +336,21 @@ class PayoutService:
         )
         await self.db.commit()
         await self.db.refresh(payout)
+
+        if notifications is not None:
+            await self._notify_requesting_rep(
+                payout, notifications, "payout_failed.html", "Payout failed",
+                {"amount": str(payout.amount), "failure_reason": reason},
+            )
+
         return payout
 
     async def apply_transfer_confirmation(
-        self, payout: Payout, success: bool, failure_reason: Optional[str]
+        self,
+        payout: Payout,
+        success: bool,
+        failure_reason: Optional[str],
+        notifications: Optional[NotificationService] = None,
     ) -> Optional[Payout]:
         """The single place that decides how a transfer webhook confirmation
         changes a Payout's status. A failed transfer never touches
@@ -356,7 +371,36 @@ class PayoutService:
         await self._write_event(payout, from_status, payout.status, PayoutActorType.WEBHOOK, None, note)
         await self.db.commit()
         await self.db.refresh(payout)
+
+        if notifications is not None:
+            if success:
+                await self._notify_requesting_rep(
+                    payout, notifications, "payout_completed.html", "Payout completed",
+                    {"amount": str(payout.amount)},
+                )
+            else:
+                await self._notify_requesting_rep(
+                    payout, notifications, "payout_failed.html", "Payout failed",
+                    {"amount": str(payout.amount), "failure_reason": failure_reason},
+                )
+
         return payout
+
+    async def _notify_requesting_rep(
+        self, payout: Payout, notifications: NotificationService, template_name: str, subject: str, context: dict
+    ) -> None:
+        admin = await self.db.get(GroupAdmin, payout.requested_by)
+        user = await self.db.get(User, admin.user_id) if admin is not None else None
+        group = await self.db.get(Group, payout.group_id)
+        if user is None or group is None:
+            return
+        await notifications.send(
+            to_email=user.email,
+            to_name=f"{user.first_name} {user.last_name}",
+            template_name=template_name,
+            subject=subject,
+            context={"first_name": user.first_name, "group_name": group.name, **context},
+        )
 
     async def list_history(self, payout_id: UUID) -> list[PayoutEvent]:
         result = await self.db.execute(
@@ -366,7 +410,10 @@ class PayoutService:
 
 
 async def initiate_transfer_for_payout(
-    payout_id: UUID, session_factory: async_sessionmaker, monnify: MonnifyClient
+    payout_id: UUID,
+    session_factory: async_sessionmaker,
+    monnify: MonnifyClient,
+    sendbyte: SendByteClient,
 ) -> None:
     """Runs as a background task right after POST /payouts/{id}/approve
     responds -- the transfer call is deliberately not inline in the request
@@ -376,6 +423,7 @@ async def initiate_transfer_for_payout(
     (test vs. production), not a hardcoded global."""
     async with session_factory() as db:
         service = PayoutService(db)
+        notifications = NotificationService(db, sendbyte)
         payout = await db.get(Payout, payout_id)
         if payout is None or payout.status != PayoutStatus.APPROVED:
             return
@@ -386,7 +434,7 @@ async def initiate_transfer_for_payout(
         settlement = settlement_result.scalar_one_or_none()
         if settlement is None or not settlement.account_name_verified:
             await service.mark_transfer_initiation_failed(
-                payout_id, "no verified settlement account on file for this group"
+                payout_id, "no verified settlement account on file for this group", notifications
             )
             return
 
@@ -402,7 +450,7 @@ async def initiate_transfer_for_payout(
             )
         except MonnifyError as exc:
             logger.warning("payout %s: transfer initiation failed: %s", payout.id, exc)
-            await service.mark_transfer_initiation_failed(payout_id, str(exc))
+            await service.mark_transfer_initiation_failed(payout_id, str(exc), notifications)
             return
 
         await service.mark_transfer_initiated(payout_id, result.reference)

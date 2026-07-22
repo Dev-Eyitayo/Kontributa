@@ -18,6 +18,7 @@ from app.modules.payments.schemas import (
     MonnifyTransferResult,
 )
 from app.modules.payments.service import MonnifyError, get_monnify_client
+from app.modules.notifications.service import SendByteError, get_sendbyte_client
 
 # Ensure every module's models are registered on Base.metadata before create_all.
 from app.modules.audit import models as _audit_models  # noqa: F401
@@ -27,6 +28,7 @@ from app.modules.contributions import models as _contribution_models  # noqa: F4
 from app.modules.group_admins import models as _group_admin_models  # noqa: F401
 from app.modules.invites import models as _invite_models  # noqa: F401
 from app.modules.members import models as _member_models  # noqa: F401
+from app.modules.notifications import models as _notifications_models  # noqa: F401
 from app.modules.organizations import models as _org_models  # noqa: F401
 from app.modules.organizations.models import Group, Organization, OrganizationType
 from app.modules.payouts import models as _payout_models  # noqa: F401
@@ -148,6 +150,20 @@ class FakeMonnifyClient:
         return MonnifyTransferResult(reference=reference, status="PENDING")
 
 
+class FakeSendByteClient:
+    """Stands in for the real SendByte API in tests -- no network access."""
+
+    def __init__(self):
+        self.sent: list[dict] = []
+        self.should_fail = False
+
+    async def send(self, to_email: str, to_name: str, subject: str, html: str) -> str:
+        if self.should_fail:
+            raise SendByteError("simulated SendByte send failure")
+        self.sent.append({"to_email": to_email, "to_name": to_name, "subject": subject, "html": html})
+        return f"fake-message-{len(self.sent)}"
+
+
 @pytest_asyncio.fixture(autouse=True)
 async def db_setup():
     # Function-scoped so the async engine and its connections are bound to
@@ -165,11 +181,13 @@ async def db_setup():
     fake_redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
 
     fake_monnify = FakeMonnifyClient()
+    fake_sendbyte = FakeSendByteClient()
 
     _state["engine"] = engine
     _state["session_local"] = session_local
     _state["redis"] = fake_redis
     _state["monnify"] = fake_monnify
+    _state["sendbyte"] = fake_sendbyte
 
     async def _override_get_db():
         async with session_local() as session:
@@ -181,9 +199,13 @@ async def db_setup():
     def _override_get_monnify_client():
         return fake_monnify
 
+    def _override_get_sendbyte_client():
+        return fake_sendbyte
+
     app.dependency_overrides[get_db] = _override_get_db
     app.dependency_overrides[get_redis] = _override_get_redis
     app.dependency_overrides[get_monnify_client] = _override_get_monnify_client
+    app.dependency_overrides[get_sendbyte_client] = _override_get_sendbyte_client
 
     yield
 
@@ -201,6 +223,7 @@ async def db_setup():
     app.dependency_overrides.pop(get_db, None)
     app.dependency_overrides.pop(get_redis, None)
     app.dependency_overrides.pop(get_monnify_client, None)
+    app.dependency_overrides.pop(get_sendbyte_client, None)
 
 
 @pytest_asyncio.fixture

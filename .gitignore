@@ -45,6 +45,7 @@ htmlcov/
 .coverage.*
 coverage.xml
 nosetests.xml
+api-spec.md
 
 
 .dockerignore

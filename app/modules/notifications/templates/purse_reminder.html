@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+{% block title %}Reminder: {{ purse_title }} is still pending{% endblock %}
+{% block content %}
+<p>Hi {{ first_name }},</p>
+<p>This is a reminder that your contribution for <strong>{{ purse_title }}</strong> (&#8358;{{ amount }}) is still pending.</p>
+<p style="color:#6b7280;">Deadline: {{ deadline }}</p>
+<p>Open the purse in your dashboard to pay whenever you're ready.</p>
+{% endblock %}

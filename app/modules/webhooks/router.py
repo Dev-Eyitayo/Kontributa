@@ -8,6 +8,7 @@ from app.core.config import settings
 from app.core.db import get_db
 from app.core.exceptions import AuthError
 from app.core.response import success_response
+from app.modules.notifications.service import SendByteClient, get_sendbyte_client
 from app.modules.payments.service import MonnifyClient
 from app.modules.webhooks.service import (
     WebhookService,
@@ -23,6 +24,7 @@ async def monnify_webhook(
     request: Request,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
+    sendbyte: SendByteClient = Depends(get_sendbyte_client),
 ) -> JSONResponse:
     raw_body = await request.body()
     signature = request.headers.get("monnify-signature", "")
@@ -39,7 +41,7 @@ async def monnify_webhook(
 
     if is_new:
         session_factory = async_sessionmaker(bind=db.bind, expire_on_commit=False)
-        background_tasks.add_task(process_collection_webhook_event, event.id, session_factory)
+        background_tasks.add_task(process_collection_webhook_event, event.id, session_factory, sendbyte)
 
     return success_response({"received": True}, status_code=202)
 
@@ -49,6 +51,7 @@ async def monnify_transfer_webhook(
     request: Request,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
+    sendbyte: SendByteClient = Depends(get_sendbyte_client),
 ) -> JSONResponse:
     raw_body = await request.body()
     signature = request.headers.get("monnify-signature", "")
@@ -67,6 +70,6 @@ async def monnify_transfer_webhook(
 
     if is_new:
         session_factory = async_sessionmaker(bind=db.bind, expire_on_commit=False)
-        background_tasks.add_task(process_transfer_webhook_event, event.id, session_factory)
+        background_tasks.add_task(process_transfer_webhook_event, event.id, session_factory, sendbyte)
 
     return success_response({"received": True}, status_code=202)

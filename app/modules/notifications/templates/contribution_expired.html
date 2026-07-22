@@ -1,0 +1,7 @@
+{% extends "base.html" %}
+{% block title %}Your invoice for {{ purse_title }} expired{% endblock %}
+{% block content %}
+<p>Hi {{ first_name }},</p>
+<p>The payment window for your <strong>{{ purse_title }}</strong> invoice ({{ amount }}) has expired without a completed payment.</p>
+<p>Open the purse in your dashboard to generate a fresh account number and try again -- no need to contact your rep.</p>
+{% endblock %}

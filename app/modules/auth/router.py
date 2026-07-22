@@ -13,7 +13,9 @@ from app.core.auth import (
     get_password_reset_token_store,
     get_refresh_token_service,
 )
+from app.core.config import settings
 from app.core.db import get_db
+from app.core.ratelimit import rate_limit_by_ip
 from app.core.response import success_response
 from app.modules.auth.schemas import (
     ForgotPasswordRequest,
@@ -25,6 +27,7 @@ from app.modules.auth.schemas import (
     VerifyEmailRequest,
 )
 from app.modules.auth.service import AuthService
+from app.modules.notifications.service import NotificationService, SendByteClient, get_sendbyte_client
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -35,11 +38,23 @@ def get_auth_service(
     blacklist: AccessTokenBlacklist = Depends(get_access_token_blacklist),
     verify_email_tokens: SingleUseTokenStore = Depends(get_email_verification_token_store),
     reset_password_tokens: SingleUseTokenStore = Depends(get_password_reset_token_store),
+    sendbyte: SendByteClient = Depends(get_sendbyte_client),
 ) -> AuthService:
-    return AuthService(db, refresh_tokens, blacklist, verify_email_tokens, reset_password_tokens)
+    return AuthService(
+        db,
+        refresh_tokens,
+        blacklist,
+        verify_email_tokens,
+        reset_password_tokens,
+        NotificationService(db, sendbyte),
+    )
 
 
-@router.post("/register", status_code=201)
+@router.post(
+    "/register",
+    status_code=201,
+    dependencies=[Depends(rate_limit_by_ip("auth:register", settings.RATE_LIMIT_REGISTER_PER_HOUR, 3600))],
+)
 async def register(payload: RegisterRequest, service: AuthService = Depends(get_auth_service)) -> JSONResponse:
     user = await service.register(payload)
     return success_response(
@@ -87,7 +102,12 @@ async def logout(
     return success_response({"logged_out": True})
 
 
-@router.post("/forgot-password")
+@router.post(
+    "/forgot-password",
+    dependencies=[
+        Depends(rate_limit_by_ip("auth:forgot-password", settings.RATE_LIMIT_FORGOT_PASSWORD_PER_HOUR, 3600))
+    ],
+)
 async def forgot_password(
     payload: ForgotPasswordRequest, service: AuthService = Depends(get_auth_service)
 ) -> JSONResponse:

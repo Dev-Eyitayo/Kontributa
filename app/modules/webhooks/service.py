@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.modules.contributions.models import ActorType, Contribution, ContributionStatus
 from app.modules.contributions.service import ContributionService
+from app.modules.notifications.service import NotificationService, SendByteClient
 from app.modules.payments.service import parse_monnify_datetime
 from app.modules.payouts.models import Payout, PayoutStatus
 from app.modules.payouts.service import PayoutService
@@ -86,7 +87,9 @@ def _extract_transfer_event(raw_payload: str) -> TransferEventData | None:
     )
 
 
-async def process_transfer_webhook_event(event_id: UUID, session_factory: async_sessionmaker) -> None:
+async def process_transfer_webhook_event(
+    event_id: UUID, session_factory: async_sessionmaker, sendbyte: SendByteClient
+) -> None:
     """Mirrors process_collection_webhook_event for disbursement/transfer
     callbacks -- same dedup-by-provider_event_id, same "only pending/
     processing rows get touched" idempotency guard, same single shared
@@ -112,7 +115,10 @@ async def process_transfer_webhook_event(event_id: UUID, session_factory: async_
             await service.mark_processed(event_id, error=f"payout already {payout.status.value}, skipped")
             return
 
-        payout = await PayoutService(db).apply_transfer_confirmation(payout, data.success, data.reason)
+        notifications = NotificationService(db, sendbyte)
+        payout = await PayoutService(db).apply_transfer_confirmation(
+            payout, data.success, data.reason, notifications
+        )
 
         await service.mark_processed(event_id)
         logger.info(
@@ -120,7 +126,9 @@ async def process_transfer_webhook_event(event_id: UUID, session_factory: async_
         )
 
 
-async def process_collection_webhook_event(event_id: UUID, session_factory: async_sessionmaker) -> None:
+async def process_collection_webhook_event(
+    event_id: UUID, session_factory: async_sessionmaker, sendbyte: SendByteClient
+) -> None:
     """Runs as a FastAPI background task, after the 202 response has already
     been sent -- opens its own DB session since the request-scoped one may
     be gone by the time this executes. Takes the session factory explicitly
@@ -152,8 +160,9 @@ async def process_collection_webhook_event(event_id: UUID, session_factory: asyn
 
         # Single shared decision point for pending -> paid/flagged_for_review --
         # the reconciliation job (Phase 4) calls this exact same method.
+        notifications = NotificationService(db, sendbyte)
         contribution = await ContributionService(db).apply_payment_confirmation(
-            contribution, data.amount_paid, data.paid_on, ActorType.WEBHOOK, "Monnify webhook"
+            contribution, data.amount_paid, data.paid_on, ActorType.WEBHOOK, "Monnify webhook", notifications
         )
 
         await service.mark_processed(event_id)

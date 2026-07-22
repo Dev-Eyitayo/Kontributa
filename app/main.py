@@ -1,0 +1,53 @@
+import logging
+
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
+
+from app.core.exceptions import AppException
+from app.core.response import error_response
+from app.modules.auth.router import router as auth_router
+from app.modules.group_admins.router import router as group_admins_router
+from app.modules.invites.router import router as invites_router
+from app.modules.members.router import router as members_router
+from app.modules.organizations.router import admin_router as organizations_admin_router
+from app.modules.organizations.router import public_router as organizations_public_router
+from app.modules.purses.router import router as purses_router
+
+logger = logging.getLogger("kontributa")
+
+app = FastAPI(title="Kontributa API", version="1.0.0")
+
+
+@app.exception_handler(AppException)
+async def app_exception_handler(request: Request, exc: AppException):
+    return error_response(exc.code, exc.message, status_code=exc.status_code, details=exc.details)
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    return error_response(
+        "validation_error",
+        "request validation failed",
+        status_code=422,
+        details=exc.errors(),
+    )
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    logger.exception("unhandled exception while processing %s %s", request.method, request.url.path)
+    return error_response("internal_error", "an unexpected error occurred", status_code=500)
+
+
+app.include_router(auth_router)
+app.include_router(organizations_public_router)
+app.include_router(organizations_admin_router)
+app.include_router(group_admins_router)
+app.include_router(invites_router)
+app.include_router(members_router)
+app.include_router(purses_router)
+
+
+@app.get("/health")
+async def health() -> dict:
+    return {"status": "ok"}

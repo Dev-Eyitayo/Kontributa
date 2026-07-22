@@ -53,3 +53,5 @@ api-spec.md
 .ruff_cache/
 .claude/
 
+monnify-docs.md
+docs/

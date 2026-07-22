@@ -8,7 +8,7 @@ from sqlalchemy import select
 
 from app.core.config import settings
 from app.modules.contributions.models import Contribution
-from tests.conftest import _state, create_org_and_group
+from tests.conftest import _state, create_org_and_group, find_redis_token
 
 
 async def _register_and_login_group_admin(client, email="rep@example.com"):
@@ -22,6 +22,8 @@ async def _register_and_login_group_admin(client, email="rep@example.com"):
             "role": "group_admin",
         },
     )
+    verify_token = await find_redis_token("verify_email")
+    await client.post("/auth/verify-email", json={"token": verify_token})
     login = await client.post("/auth/login", json={"email": email, "password": "password123"})
     return login.json()["data"]["access_token"]
 
@@ -31,6 +33,8 @@ async def _register_and_login_member(client, token, email, first_name="Ada", las
         f"/members/join/{token}",
         json={"email": email, "password": "password123", "first_name": first_name, "last_name": last_name},
     )
+    verify_token = await find_redis_token("verify_email")
+    await client.post("/auth/verify-email", json={"token": verify_token})
     login = await client.post("/auth/login", json={"email": email, "password": "password123"})
     return login.json()["data"]["access_token"]
 
@@ -88,7 +92,10 @@ def _webhook_body(payment_reference: str, amount_paid: str, transaction_referenc
             "paymentReference": payment_reference,
             "amountPaid": amount_paid,
             "paymentStatus": "PAID",
-            "paidOn": "22/07/2026 03:14:00 PM",
+            # Real Monnify collection webhooks send paidOn with milliseconds
+            # (confirmed against Monnify's webhook event-type docs) --
+            # distinct from disbursement webhooks' dd/MM/yyyy format.
+            "paidOn": "2026-07-22 15:14:00.000",
         },
     }
     return json.dumps(payload).encode()

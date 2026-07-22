@@ -1,9 +1,12 @@
 import re
+from typing import Optional
 from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.auth import SingleUseTokenStore
+from app.core.config import settings
 from app.core.exceptions import ConflictError, NotFoundError, ValidationAppError
 from app.core.security import hash_password
 from app.modules.auth.models import User
@@ -12,14 +15,22 @@ from app.modules.group_admins.models import GroupAdmin
 from app.modules.invites.service import InviteService
 from app.modules.members.models import Member, VerificationStatus
 from app.modules.members.schemas import JoinRequest, MemberUpdateRequest
+from app.modules.notifications.service import NotificationService
 from app.modules.organizations.models import Group, Organization
 
 
 class MemberService:
-    def __init__(self, db: AsyncSession):
+    def __init__(
+        self,
+        db: AsyncSession,
+        verify_email_tokens: Optional[SingleUseTokenStore] = None,
+        notifications: Optional[NotificationService] = None,
+    ):
         self.db = db
         self.invites = InviteService(db)
         self.contributions = ContributionService(db)
+        self.verify_email_tokens = verify_email_tokens
+        self.notifications = notifications
 
     async def _get_by_user_email(self, email: str) -> User | None:
         result = await self.db.execute(select(User).where(User.email == email))
@@ -66,6 +77,7 @@ class MemberService:
                 raise ConflictError("email already registered as a member", code="duplicate_email")
 
             user = existing_user
+            is_new_user = False
         else:
             user = User(
                 email=payload.email,
@@ -76,6 +88,7 @@ class MemberService:
             )
             self.db.add(user)
             await self.db.flush()
+            is_new_user = True
 
         member = Member(
             user_id=user.id,
@@ -92,6 +105,26 @@ class MemberService:
         await self.invites.redeem(token)
         await self.contributions.generate_for_new_member(member)
         await self.contributions.ensure_for_invited_purse(member, invite.purse_id)
+
+        if is_new_user and self.verify_email_tokens is not None and self.notifications is not None:
+            # Mirrors AuthService.register() -- join() creates a base User
+            # too (per api-spec.md: "creates the base user (if new)"), so it
+            # must trigger the same email-verification step, otherwise a
+            # member who joined via invite could never satisfy the
+            # "blocked from paying until verified" business rule.
+            verify_token = await self.verify_email_tokens.issue(user.id)
+            await self.notifications.send(
+                to_email=user.email,
+                to_name=f"{user.first_name} {user.last_name}",
+                template_name="verify_email.html",
+                subject="Verify your Kontributa account",
+                context={
+                    "first_name": user.first_name,
+                    "verification_token": verify_token,
+                    "expires_in_hours": settings.EMAIL_VERIFICATION_TOKEN_EXPIRE_HOURS,
+                },
+            )
+
         return member
 
     async def get_me(self, user_id: UUID) -> tuple[Member, User, Group]:

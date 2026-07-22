@@ -91,6 +91,9 @@ async def generate_invoice(
     member_user = await db.get(User, member.user_id)
     purse = await db.get(Purse, contribution.purse_id)
 
+    if member_user is None or not member_user.is_verified:
+        raise ForbiddenError("email verification required before paying", code="email_not_verified")
+
     notifications = NotificationService(db, sendbyte)
     contribution = await service.generate_invoice(contribution, monnify, member, member_user, purse, notifications)
 

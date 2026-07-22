@@ -80,10 +80,15 @@ def _extract_transfer_event(raw_payload: str) -> TransferEventData | None:
         return None
 
     event_data = payload.get("eventData", {})
+    # Confirmed against Monnify's own webhook event-type docs: a failed
+    # disbursement's human-readable explanation is in `transactionDescription`
+    # (e.g. "You do not have sufficient balance..."), not a `reason` field --
+    # Monnify's payload never has one. Reading `reason` here would have
+    # silently discarded every real failure explanation in production.
     return TransferEventData(
         reference=event_data.get("reference", ""),
         success=event_type == "SUCCESSFUL_DISBURSEMENT",
-        reason=event_data.get("reason") if event_type != "SUCCESSFUL_DISBURSEMENT" else None,
+        reason=event_data.get("transactionDescription") if event_type != "SUCCESSFUL_DISBURSEMENT" else None,
     )
 
 

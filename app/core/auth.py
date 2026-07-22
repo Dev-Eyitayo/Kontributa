@@ -266,3 +266,19 @@ async def get_current_admin_user(
     if row is None or not row.is_platform_admin:
         raise ForbiddenError("admin access required")
     return user
+
+
+async def require_verified_email(
+    user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> CurrentUser:
+    """Per api-spec.md: 'Unverified email may still log in but is blocked
+    from creating purses/paying until verified.' Composes with a role
+    dependency (e.g. Depends(get_current_group_admin_user)) rather than
+    replacing it -- this only adds the verification gate on top."""
+    from app.modules.auth.models import User
+
+    row = await db.get(User, user.id)
+    if row is None or not row.is_verified:
+        raise ForbiddenError("email verification required for this action", code="email_not_verified")
+    return user

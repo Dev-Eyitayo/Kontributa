@@ -125,3 +125,31 @@ async def test_forgot_password_unknown_email_still_returns_200(client):
     resp = await client.post("/auth/forgot-password", json={"email": "nobody@example.com"})
     assert resp.status_code == 200
     assert resp.json()["success"] is True
+
+
+async def test_logout_revokes_refresh_token_and_blacklists_access_token(client):
+    await _register(client, email="logout-test@example.com", role="group_admin", password="password123")
+    login = await client.post(
+        "/auth/login", json={"email": "logout-test@example.com", "password": "password123"}
+    )
+    access_token = login.json()["data"]["access_token"]
+    refresh_token = login.json()["data"]["refresh_token"]
+
+    # Valid token, just not onboarded yet -- proves the token is accepted
+    # by the auth layer before logout.
+    before = await client.get("/group-admins/me", headers={"Authorization": f"Bearer {access_token}"})
+    assert before.status_code == 404
+
+    logout = await client.post(
+        "/auth/logout",
+        json={"refresh_token": refresh_token},
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
+    assert logout.status_code == 200
+    assert logout.json()["data"]["logged_out"] is True
+
+    after = await client.get("/group-admins/me", headers={"Authorization": f"Bearer {access_token}"})
+    assert after.status_code == 401
+
+    refresh_after_logout = await client.post("/auth/refresh-token", json={"refresh_token": refresh_token})
+    assert refresh_after_logout.status_code == 401

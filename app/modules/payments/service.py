@@ -23,7 +23,18 @@ class MonnifyError(AppException):
 
 
 def parse_monnify_datetime(value: str) -> Optional[datetime]:
-    for fmt in ("%d/%m/%Y %I:%M:%S %p", "%Y-%m-%d %H:%M:%S"):
+    """Monnify is not consistent about this format across APIs: collection
+    webhooks send `paidOn` as "2021-11-17 11:28:42.615" (with milliseconds,
+    confirmed against Monnify's own webhook event-type docs), while
+    disbursement webhooks send `createdOn`/`completedOn` as
+    "17/03/2021 3:23:32 AM". Both are tried; unrecognized formats return
+    None rather than raising, since a bad date shouldn't block processing
+    the rest of the event."""
+    for fmt in (
+        "%Y-%m-%d %H:%M:%S.%f",
+        "%d/%m/%Y %I:%M:%S %p",
+        "%Y-%m-%d %H:%M:%S",
+    ):
         try:
             return datetime.strptime(value, fmt).replace(tzinfo=timezone.utc)
         except ValueError:
@@ -35,19 +46,32 @@ class MonnifyClient:
     """
     Thin wrapper around Monnify's Dynamic Invoice + transaction status APIs.
 
-    Request/response field names follow Monnify's documented conventions
-    (confirmed: webhook signature header/algorithm; best-effort from public
-    integration references for the invoice create/status payload shapes,
-    since Monnify's interactive API reference is a JS-rendered page this
-    environment could not fully scrape) -- verify against a live sandbox
-    call before depending on this in production.
+    Confirmed directly against Monnify's own docs: the invoice/create
+    request payload shape, the webhook signature algorithm
+    (HMAC-SHA512(client secret key, raw request body)), the shared
+    responseBody envelope, the Single Transfer request/response fields
+    (including sourceAccountNumber, easy to miss and not optional), and
+    collection-webhook paidOn's millisecond datetime format (distinct from
+    disbursement webhooks' dd/MM/yyyy format -- parse_monnify_datetime
+    handles both). The invoice/create *response* body shape (accountNumber,
+    bankName, etc.) and the transaction-status query response were not
+    shown in the docs reviewed -- still best-effort, worth one real
+    sandbox call to confirm before depending on this in production.
     """
 
-    def __init__(self, base_url: str, api_key: str, secret_key: str, contract_code: str):
+    def __init__(
+        self,
+        base_url: str,
+        api_key: str,
+        secret_key: str,
+        contract_code: str,
+        source_account_number: str = "",
+    ):
         self._base_url = base_url.rstrip("/")
         self._api_key = api_key
         self._secret_key = secret_key
         self._contract_code = contract_code
+        self._source_account_number = source_account_number
         self._access_token: Optional[str] = None
         self._token_expires_at: Optional[datetime] = None
 
@@ -186,6 +210,7 @@ class MonnifyClient:
                 "destinationAccountNumber": account_number,
                 "destinationAccountName": account_name,
                 "currency": "NGN",
+                "sourceAccountNumber": self._source_account_number,
             },
         )
         return MonnifyTransferResult(
@@ -209,6 +234,7 @@ monnify_client = MonnifyClient(
     api_key=settings.MONNIFY_API_KEY,
     secret_key=settings.MONNIFY_SECRET_KEY,
     contract_code=settings.MONNIFY_CONTRACT_CODE,
+    source_account_number=settings.MONNIFY_SOURCE_ACCOUNT_NUMBER,
 )
 
 

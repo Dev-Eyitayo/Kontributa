@@ -2,18 +2,28 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.auth import CurrentUser, get_current_member_user
+from app.core.auth import (
+    CurrentUser,
+    SingleUseTokenStore,
+    get_current_member_user,
+    get_email_verification_token_store,
+)
 from app.core.db import get_db
 from app.core.response import success_response
 from app.modules.contributions.service import ContributionService
 from app.modules.members.schemas import JoinRequest, MemberUpdateRequest
 from app.modules.members.service import MemberService
+from app.modules.notifications.service import NotificationService, SendByteClient, get_sendbyte_client
 
 router = APIRouter(prefix="/members", tags=["members"])
 
 
-def get_member_service(db: AsyncSession = Depends(get_db)) -> MemberService:
-    return MemberService(db)
+def get_member_service(
+    db: AsyncSession = Depends(get_db),
+    verify_email_tokens: SingleUseTokenStore = Depends(get_email_verification_token_store),
+    sendbyte: SendByteClient = Depends(get_sendbyte_client),
+) -> MemberService:
+    return MemberService(db, verify_email_tokens, NotificationService(db, sendbyte))
 
 
 def get_contribution_service(db: AsyncSession = Depends(get_db)) -> ContributionService:

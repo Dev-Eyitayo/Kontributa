@@ -40,10 +40,11 @@ class SendByteClient:
     MonnifyClient).
 
     Request/response shape (POST {base_url}/v1/emails, Bearer auth, JSON
-    body with from/to/subject/html, {id} on success) is best-effort from
-    SendByte's public docs (docs.sendbyte.africa was not fully scrapeable);
-    verify against a live sandbox call before depending on this in
-    production, same caveat already noted on the Monnify client.
+    body with from/to/subject/html, 201 with {id, status: "queued"} on
+    success) confirmed directly against SendByte's own quickstart docs.
+    Key modes (sk_test_/sk_live_) and scopes are a config-only concern --
+    SENDBYTE_API_KEY is the only thing that changes between sandbox and
+    live, never this client's code.
     """
 
     def __init__(self, base_url: str, api_key: str, from_email: str, from_name: str):

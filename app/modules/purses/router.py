@@ -10,6 +10,7 @@ from app.core.auth import (
     get_current_group_admin_user,
     get_current_member_user,
     get_current_user,
+    require_verified_email,
 )
 from app.core.db import get_db
 from app.core.exceptions import ForbiddenError
@@ -58,6 +59,7 @@ async def create_purse(
     payload: CreatePurseRequest,
     idempotency_key: Optional[str] = Depends(get_idempotency_key),
     current_user: CurrentUser = Depends(get_current_group_admin_user),
+    _verified: CurrentUser = Depends(require_verified_email),
     purse_service: PurseService = Depends(get_purse_service),
     admin_service: GroupAdminService = Depends(get_group_admin_service),
     idem_store: IdempotencyStore = Depends(get_idempotency_store),

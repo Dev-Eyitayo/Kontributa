@@ -11,7 +11,7 @@ from app.core.config import settings
 from app.modules.contributions.models import Contribution
 from app.modules.notifications.models import NotificationLog
 from app.modules.purses.models import Purse
-from tests.conftest import _state, create_org_and_group, create_platform_admin
+from tests.conftest import _state, create_org_and_group, create_platform_admin, find_redis_token
 
 
 async def _admin_platform_headers(db_session):
@@ -31,6 +31,8 @@ async def _register_and_login_group_admin(client, email="rep@example.com"):
             "role": "group_admin",
         },
     )
+    verify_token = await find_redis_token("verify_email")
+    await client.post("/auth/verify-email", json={"token": verify_token})
     login = await client.post("/auth/login", json={"email": email, "password": "password123"})
     return login.json()["data"]["access_token"]
 
@@ -40,6 +42,8 @@ async def _register_and_login_member(client, token, email, first_name="Ada", las
         f"/members/join/{token}",
         json={"email": email, "password": "password123", "first_name": first_name, "last_name": last_name},
     )
+    verify_token = await find_redis_token("verify_email")
+    await client.post("/auth/verify-email", json={"token": verify_token})
     login = await client.post("/auth/login", json={"email": email, "password": "password123"})
     return login.json()["data"]["access_token"]
 
@@ -146,7 +150,8 @@ def _collection_webhook_body(payment_reference: str, amount_paid: str) -> bytes:
             "paymentReference": payment_reference,
             "amountPaid": amount_paid,
             "paymentStatus": "PAID",
-            "paidOn": "22/07/2026 03:14:00 PM",
+            # Real Monnify collection webhooks send paidOn with milliseconds.
+            "paidOn": "2026-07-22 15:14:00.000",
         },
     }
     return json.dumps(payload).encode()
@@ -278,6 +283,7 @@ async def test_register_rate_limited_after_burst(client):
 async def test_receipt_email_sent_on_webhook_paid(client, db_session):
     ctx = await _setup_purse_with_member(client, db_session, amount="2500.00")
     await _generate_invoice(client, ctx["member_headers"], ctx["contribution_id"])
+    _state["sendbyte"].sent.clear()  # discard the join-time verification email
 
     result = await db_session.execute(select(Contribution).where(Contribution.id == ctx["contribution_id"]))
     contribution = result.scalar_one()
@@ -294,6 +300,7 @@ async def test_receipt_email_sent_on_webhook_paid(client, db_session):
 async def test_expiry_notice_sent_when_invoice_lapses(client, db_session):
     ctx = await _setup_purse_with_member(client, db_session)
     await _generate_invoice(client, ctx["member_headers"], ctx["contribution_id"])
+    _state["sendbyte"].sent.clear()  # discard the join-time verification email
 
     result = await db_session.execute(select(Contribution).where(Contribution.id == ctx["contribution_id"]))
     contribution = result.scalar_one()
@@ -325,7 +332,10 @@ async def test_email_failure_does_not_block_payment_confirmation(client, db_sess
     assert check.json()["data"]["status"] == "paid"
 
     log_result = await db_session.execute(
-        select(NotificationLog).where(NotificationLog.to_email == "ada@example.com")
+        select(NotificationLog).where(
+            NotificationLog.to_email == "ada@example.com",
+            NotificationLog.template_name == "payment_receipt.html",
+        )
     )
     log = log_result.scalar_one()
     assert log.status.value == "failed"

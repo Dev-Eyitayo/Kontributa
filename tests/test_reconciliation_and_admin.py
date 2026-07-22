@@ -138,7 +138,8 @@ async def test_admin_webhook_events_and_flagged_contributions(client, db_session
                 "paymentReference": contribution.invoice_id,
                 "amountPaid": "2000.00",
                 "paymentStatus": "PAID",
-                "paidOn": "22/07/2026 03:14:00 PM",
+                # Real Monnify collection webhooks send paidOn with milliseconds.
+                "paidOn": "2026-07-22 15:14:00.000",
             },
         }
     ).encode()

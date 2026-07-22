@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta, timezone
 
-from tests.conftest import create_org_and_group
+from tests.conftest import create_org_and_group, find_redis_token
 
 
 async def _register_and_login_group_admin(client, email="rep@example.com"):
@@ -14,6 +14,8 @@ async def _register_and_login_group_admin(client, email="rep@example.com"):
             "role": "group_admin",
         },
     )
+    verify_token = await find_redis_token("verify_email")
+    await client.post("/auth/verify-email", json={"token": verify_token})
     login = await client.post("/auth/login", json={"email": email, "password": "password123"})
     return login.json()["data"]["access_token"]
 

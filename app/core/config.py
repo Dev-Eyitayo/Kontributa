@@ -36,6 +36,11 @@ class Settings(BaseSettings):
     MONNIFY_SECRET_KEY: str = ""
     MONNIFY_CONTRACT_CODE: str = ""
     MONNIFY_INVOICE_EXPIRY_MINUTES: int = 60
+    # The merchant's own Monnify disbursement wallet account number --
+    # required by the Single Transfer API as `sourceAccountNumber` (the
+    # account funds are debited from). Distinct from any destination
+    # account a transfer pays out to.
+    MONNIFY_SOURCE_ACCOUNT_NUMBER: str = ""
 
     RECONCILIATION_INTERVAL_MINUTES: int = 20
     RECONCILIATION_PENDING_THRESHOLD_MINUTES: int = 60

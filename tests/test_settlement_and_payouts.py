@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 from app.core.auth import create_access_token
-from tests.conftest import _state, create_org_and_group, create_platform_admin
+from tests.conftest import _state, create_org_and_group, create_platform_admin, find_redis_token
 
 
 async def _admin_platform_headers(db_session):
@@ -23,6 +23,8 @@ async def _register_and_login_group_admin(client, email="rep@example.com"):
             "role": "group_admin",
         },
     )
+    verify_token = await find_redis_token("verify_email")
+    await client.post("/auth/verify-email", json={"token": verify_token})
     login = await client.post("/auth/login", json={"email": email, "password": "password123"})
     return login.json()["data"]["access_token"]
 
@@ -341,7 +343,9 @@ async def test_transfer_webhook_failure_leaves_balance_unchanged_and_retriable(c
             "eventData": {
                 "transactionReference": f"MNFY|{transfer_ref}",
                 "reference": transfer_ref,
-                "reason": "insufficient funds in wallet",
+                # Real Monnify FAILED_DISBURSEMENT events carry the failure
+                # explanation in transactionDescription, not a "reason" key.
+                "transactionDescription": "insufficient funds in wallet",
             },
         }
     ).encode()
@@ -436,3 +440,46 @@ async def test_payout_approve_requires_platform_admin(client, db_session):
 
     resp = await client.post(f"/payouts/{payout_id}/approve", headers=headers)
     assert resp.status_code == 403
+
+
+async def test_member_cannot_list_or_view_payouts(client, db_session):
+    org, group, headers, purse_id = await _setup_purse_with_paid_contribution(client, db_session, collected="2500.00")
+
+    create = await client.post(
+        "/payouts", json={"group_id": str(group.id), "purse_id": purse_id, "amount": "2000.00"}, headers=headers
+    )
+    payout_id = create.json()["data"]["id"]
+
+    invite = await client.post("/group-admins/invite-links", json={"expires_in_days": 7}, headers=headers)
+    token = invite.json()["data"]["token"]
+    await client.post(
+        f"/members/join/{token}",
+        json={"email": "onlooker@example.com", "password": "password123", "first_name": "On", "last_name": "Looker"},
+    )
+    login = await client.post("/auth/login", json={"email": "onlooker@example.com", "password": "password123"})
+    member_headers = {"Authorization": f"Bearer {login.json()['data']['access_token']}"}
+
+    list_resp = await client.get("/payouts", headers=member_headers)
+    assert list_resp.status_code == 403
+
+    detail_resp = await client.get(f"/payouts/{payout_id}", headers=member_headers)
+    assert detail_resp.status_code == 403
+
+
+async def test_platform_admin_can_list_and_view_all_payouts(client, db_session):
+    org, group, headers, purse_id = await _setup_purse_with_paid_contribution(client, db_session, collected="2500.00")
+
+    create = await client.post(
+        "/payouts", json={"group_id": str(group.id), "purse_id": purse_id, "amount": "2000.00"}, headers=headers
+    )
+    payout_id = create.json()["data"]["id"]
+
+    admin_headers = await _admin_platform_headers(db_session)
+
+    list_resp = await client.get("/payouts", headers=admin_headers)
+    assert list_resp.status_code == 200
+    assert any(p["id"] == payout_id for p in list_resp.json()["data"])
+
+    detail_resp = await client.get(f"/payouts/{payout_id}", headers=admin_headers)
+    assert detail_resp.status_code == 200
+    assert detail_resp.json()["data"]["id"] == payout_id

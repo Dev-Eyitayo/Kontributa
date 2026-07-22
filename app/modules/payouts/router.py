@@ -9,6 +9,7 @@ from app.core.auth import CurrentUser, get_current_admin_user, get_current_group
 from app.core.db import get_db
 from app.core.exceptions import ForbiddenError
 from app.core.response import success_response
+from app.modules.auth.models import User
 from app.modules.group_admins.service import GroupAdminService
 from app.modules.notifications.service import SendByteClient, get_sendbyte_client
 from app.modules.payments.service import MonnifyClient, get_monnify_client
@@ -59,13 +60,21 @@ async def list_payouts(
     current_user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
+    # A platform admin's JWT role claim is still "group_admin" -- it's the
+    # is_platform_admin flag on User that actually distinguishes them (same
+    # pattern as audit/router.py's get_payout_audit). Checking role alone
+    # would either 404 a platform admin lacking a GroupAdmin profile, or
+    # (worse) let a member fall through to list_all and see every
+    # department's payouts -- both were live bugs before this check.
     service = PayoutService(db)
-    if current_user.role == "group_admin":
-        
+    user_row = await db.get(User, current_user.id)
+    if user_row is not None and user_row.is_platform_admin:
+        payouts = await service.list_all(status)
+    elif current_user.role == "group_admin":
         admin = await GroupAdminService(db).get_by_user_id(current_user.id)
         payouts = await service.list_for_group(admin.group_id, status)
     else:
-        payouts = await service.list_all(status)
+        raise ForbiddenError("only a group admin or platform admin can list payouts")
 
     return success_response([_payout_out(p) for p in payouts])
 
@@ -79,10 +88,15 @@ async def get_payout(
 ) -> JSONResponse:
     payout = await service.get_by_id(payout_id)
 
-    if current_user.role == "group_admin":
+    user_row = await db.get(User, current_user.id)
+    if user_row is not None and user_row.is_platform_admin:
+        pass
+    elif current_user.role == "group_admin":
         admin = await GroupAdminService(db).get_by_user_id(current_user.id)
         if payout.group_id != admin.group_id:
             raise ForbiddenError("cannot view another group's payout")
+    else:
+        raise ForbiddenError("only a group admin or platform admin can view a payout")
 
     return success_response(
         {

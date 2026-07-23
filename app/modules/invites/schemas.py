@@ -9,6 +9,10 @@ class OrganizationBrief(BaseModel):
     id: UUID
     name: str
     short_code: str
+    # Only exposed here (invite resolution), not on the public org list/admin
+    # endpoints -- a frontend needs this to hint the expected member_id_number
+    # format on the join form itself, before the member ever submits it.
+    member_id_format: Optional[str] = None
 
 
 class GroupBrief(BaseModel):

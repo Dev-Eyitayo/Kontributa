@@ -12,7 +12,6 @@ from app.core.exceptions import ConflictError, NotFoundError, ValidationAppError
 from app.core.security import hash_password
 from app.modules.auth.models import User
 from app.modules.contributions.service import ContributionService
-from app.modules.group_admins.models import GroupAdmin
 from app.modules.invites.service import InviteService
 from app.modules.members.models import Member, VerificationStatus
 from app.modules.members.schemas import JoinRequest, MemberUpdateRequest
@@ -38,11 +37,28 @@ class MemberService:
         return result.scalar_one_or_none()
 
     async def get_by_user_id(self, user_id: UUID) -> Member:
-        result = await self.db.execute(select(Member).where(Member.user_id == user_id))
-        member = result.scalar_one_or_none()
+        """A user can now hold a Member row in more than one group (see
+        join_additional_group below), so this can no longer assume a single
+        result. Every "current member" screen (/members/me and everything
+        that hangs off it) is still single-membership-shaped -- there is no
+        group switcher yet -- so this deterministically resolves to the
+        most-recently-joined membership rather than raising
+        MultipleResultsFound. Documented as a known limitation, not silently
+        papered over: a member in two groups only ever sees one of them
+        through these endpoints."""
+        result = await self.db.execute(
+            select(Member).where(Member.user_id == user_id).order_by(Member.created_at.desc())
+        )
+        member = result.scalars().first()
         if member is None:
             raise NotFoundError("member profile not found")
         return member
+
+    async def get_by_user_and_group(self, user_id: UUID, group_id: UUID) -> Optional[Member]:
+        result = await self.db.execute(
+            select(Member).where(Member.user_id == user_id, Member.group_id == group_id)
+        )
+        return result.scalar_one_or_none()
 
     async def _validate_member_id_number(self, group_id: UUID, member_id_number: str | None) -> None:
         if member_id_number is None:
@@ -61,35 +77,33 @@ class MemberService:
             )
 
     async def join(self, token: str, payload: JoinRequest) -> Member:
+        """Anonymous join: email + password proves nothing about who's
+        actually submitting this request, so an existing account (member or
+        group admin, any group) is never silently attached here regardless
+        of whether it already has a Member row for this group -- doing so
+        would let anyone who merely knows someone else's email address graft
+        a new group membership onto that person's account without ever
+        proving they own it. An existing account that legitimately wants to
+        join an additional group must go through join_additional_group
+        below, which requires an authenticated session instead of a
+        resubmitted password."""
         invite, group, _organization, _purse_title = await self.invites.resolve(token)
 
         await self._validate_member_id_number(group.id, payload.member_id_number)
 
         existing_user = await self._get_by_user_email(payload.email)
         if existing_user is not None:
-            existing_admin = await self.db.execute(
-                select(GroupAdmin).where(GroupAdmin.user_id == existing_user.id)
-            )
-            if existing_admin.scalar_one_or_none() is not None:
-                raise ConflictError("email already belongs to a group admin account", code="duplicate_email")
+            raise ConflictError("email already registered", code="duplicate_email")
 
-            existing_member = await self.db.execute(select(Member).where(Member.user_id == existing_user.id))
-            if existing_member.scalar_one_or_none() is not None:
-                raise ConflictError("email already registered as a member", code="duplicate_email")
-
-            user = existing_user
-            is_new_user = False
-        else:
-            user = User(
-                email=payload.email,
-                password_hash=hash_password(payload.password),
-                first_name=payload.first_name,
-                last_name=payload.last_name,
-                role="member",
-            )
-            self.db.add(user)
-            await self.db.flush()
-            is_new_user = True
+        user = User(
+            email=payload.email,
+            password_hash=hash_password(payload.password),
+            first_name=payload.first_name,
+            last_name=payload.last_name,
+            role="member",
+        )
+        self.db.add(user)
+        await self.db.flush()
 
         member = Member(
             user_id=user.id,
@@ -103,12 +117,10 @@ class MemberService:
         try:
             await self.db.commit()
         except IntegrityError:
-            # Same check-then-insert race as AuthService.register(): two
-            # near-simultaneous joins with the same new email (users.email
-            # unique) or somehow racing the same user into two Member rows
-            # (members.user_id unique) both hit their real guarantee at the
-            # DB constraint, not the read above. Turn that into the same
-            # clean 409 the non-racing path already returns.
+            # Two near-simultaneous joins with the same new email hit
+            # users.email's unique constraint on commit, not the read above
+            # -- turn that into the same clean 409 the non-racing path
+            # already returns, instead of an unhandled IntegrityError.
             await self.db.rollback()
             raise ConflictError("email already registered", code="duplicate_email")
         await self.db.refresh(member)
@@ -117,7 +129,7 @@ class MemberService:
         await self.contributions.generate_for_new_member(member)
         await self.contributions.ensure_for_invited_purse(member, invite.purse_id)
 
-        if is_new_user and self.verify_email_tokens is not None and self.notifications is not None:
+        if self.verify_email_tokens is not None and self.notifications is not None:
             # Mirrors AuthService.register() -- join() creates a base User
             # too (per api-spec.md: "creates the base user (if new)"), so it
             # must trigger the same email-verification step, otherwise a
@@ -135,6 +147,47 @@ class MemberService:
                     "expires_in_minutes": settings.EMAIL_VERIFICATION_TOKEN_EXPIRE_MINUTES,
                 },
             )
+
+        return member
+
+    async def join_additional_group(
+        self, token: str, user_id: UUID, member_id_number: Optional[str]
+    ) -> Member:
+        """The authenticated counterpart to join() -- for an account
+        (member or group admin) that already exists and wants to join a
+        *different* group than any it's already a Member of. No new User
+        row is ever created here; the caller is identified by their bearer
+        token, not by a resubmitted email/password."""
+        invite, group, _organization, _purse_title = await self.invites.resolve(token)
+
+        await self._validate_member_id_number(group.id, member_id_number)
+
+        existing = await self.get_by_user_and_group(user_id, invite.group_id)
+        if existing is not None:
+            raise ConflictError("already a member of this group", code="duplicate_email")
+
+        member = Member(
+            user_id=user_id,
+            group_id=invite.group_id,
+            cohort=invite.cohort,
+            member_id_number=member_id_number,
+            verification_status=VerificationStatus.PENDING,
+            invite_source=invite.id,
+        )
+        self.db.add(member)
+        try:
+            await self.db.commit()
+        except IntegrityError:
+            # Same check-then-insert race as join(): two near-simultaneous
+            # calls for the same (user, group) hit the composite unique
+            # constraint on commit, not the read above.
+            await self.db.rollback()
+            raise ConflictError("already a member of this group", code="duplicate_email")
+        await self.db.refresh(member)
+
+        await self.invites.redeem(token)
+        await self.contributions.generate_for_new_member(member)
+        await self.contributions.ensure_for_invited_purse(member, invite.purse_id)
 
         return member
 

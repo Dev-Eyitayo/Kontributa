@@ -10,6 +10,7 @@ from app.core.response import error_response
 from app.modules.admin.router import router as admin_router
 from app.modules.audit.router import router as audit_router
 from app.modules.auth.router import router as auth_router
+from app.modules.banks.router import router as banks_router
 from app.modules.contributions.router import router as contributions_router
 from app.modules.group_admins.router import router as group_admins_router
 from app.modules.invites.router import router as invites_router
@@ -73,6 +74,7 @@ app.include_router(admin_router)
 app.include_router(settlement_router)
 app.include_router(payouts_router)
 app.include_router(audit_router)
+app.include_router(banks_router)
 
 
 @app.get("/health")

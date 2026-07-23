@@ -133,6 +133,9 @@ class FakeMonnifyClient:
     async def get_bank_name(self, bank_code: str) -> str:
         return self.bank_names.get(bank_code, "Test Bank")
 
+    async def list_banks(self) -> list[dict]:
+        return [{"bank_code": "058", "bank_name": "Guaranty Trust Bank"}, {"bank_code": "011", "bank_name": "First Bank"}]
+
     async def initiate_single_transfer(
         self, reference, amount, bank_code, account_number, account_name, narration
     ) -> MonnifyTransferResult:

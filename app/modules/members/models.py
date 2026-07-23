@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import DateTime, Enum, ForeignKey, String, func
+from sqlalchemy import DateTime, Enum, ForeignKey, String, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -18,10 +18,17 @@ class VerificationStatus(str, enum.Enum):
 
 class Member(Base):
     __tablename__ = "members"
+    __table_args__ = (
+        # A user may hold at most one Member row per group (not per platform
+        # -- see MemberService.join_additional_group -- a group_admin or an
+        # existing member of a different group can legitimately hold a
+        # second Member row for a different group).
+        UniqueConstraint("user_id", "group_id", name="uq_members_user_id_group_id"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("users.id"), unique=True, nullable=False, index=True
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True
     )
     group_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("groups.id"), nullable=False, index=True

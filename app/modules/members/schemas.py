@@ -19,6 +19,10 @@ class JoinResponse(BaseModel):
     verification_status: str
 
 
+class JoinAdditionalGroupRequest(BaseModel):
+    member_id_number: Optional[str] = None
+
+
 class GroupBrief(BaseModel):
     id: UUID
     name: str
@@ -48,6 +52,7 @@ class MemberUpdateResponse(BaseModel):
 
 
 class MemberPurseListItem(BaseModel):
+    contribution_id: UUID
     purse_id: UUID
     title: str
     amount: str

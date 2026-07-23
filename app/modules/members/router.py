@@ -6,12 +6,14 @@ from app.core.auth import (
     CurrentUser,
     SingleUseTokenStore,
     get_current_member_user,
+    get_current_user,
     get_email_verification_token_store,
 )
 from app.core.db import get_db
 from app.core.response import StandardResponse, success_response
 from app.modules.contributions.service import ContributionService
 from app.modules.members.schemas import (
+    JoinAdditionalGroupRequest,
     JoinRequest,
     JoinResponse,
     MemberMeResponse,
@@ -42,6 +44,25 @@ async def join(
     token: str, payload: JoinRequest, service: MemberService = Depends(get_member_service)
 ) -> JSONResponse:
     member = await service.join(token, payload)
+    return success_response(
+        {
+            "id": str(member.id),
+            "group_id": str(member.group_id),
+            "cohort": member.cohort,
+            "verification_status": member.verification_status.value,
+        },
+        status_code=201,
+    )
+
+
+@router.post("/join-additional/{token}", status_code=201, response_model=StandardResponse[JoinResponse])
+async def join_additional_group(
+    token: str,
+    payload: JoinAdditionalGroupRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+    service: MemberService = Depends(get_member_service),
+) -> JSONResponse:
+    member = await service.join_additional_group(token, current_user.id, payload.member_id_number)
     return success_response(
         {
             "id": str(member.id),
@@ -99,6 +120,7 @@ async def list_my_purses(
     return success_response(
         [
             {
+                "contribution_id": str(contribution.id),
                 "purse_id": str(purse.id),
                 "title": purse.title,
                 "amount": str(purse.amount),

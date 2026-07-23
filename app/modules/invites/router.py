@@ -25,6 +25,7 @@ async def resolve_invite(token: str, service: InviteService = Depends(get_invite
                 "id": str(organization.id),
                 "name": organization.name,
                 "short_code": organization.short_code,
+                "member_id_format": organization.member_id_format,
             },
             "purse_title": purse_title,
         }

@@ -134,6 +134,53 @@ async def test_settlement_lookup_does_not_save(client, db_session):
     assert get_resp.status_code == 404
 
 
+async def test_list_banks_returns_monnify_bank_list(client, db_session):
+    org, group, headers, purse_id = await _setup_purse_with_paid_contribution(client, db_session)
+
+    resp = await client.get("/banks", headers=headers)
+    assert resp.status_code == 200
+    body = resp.json()["data"]
+    assert len(body) >= 1
+    assert {"bank_code", "bank_name"} <= set(body[0].keys())
+
+
+async def test_list_banks_is_cached_between_calls(client, db_session):
+    org, group, headers, purse_id = await _setup_purse_with_paid_contribution(client, db_session)
+
+    first = await client.get("/banks", headers=headers)
+    assert first.status_code == 200
+
+    cached_raw = await _state["redis"].get("banks:monnify")
+    assert cached_raw is not None
+
+    second = await client.get("/banks", headers=headers)
+    assert second.status_code == 200
+    assert second.json()["data"] == first.json()["data"]
+
+
+async def test_list_banks_requires_group_admin_role(client, db_session):
+    org, group, headers, purse_id = await _setup_purse_with_paid_contribution(client, db_session)
+
+    invite = await client.post("/group-admins/invite-links", json={"expires_in_days": 7}, headers=headers)
+    token = invite.json()["data"]["token"]
+    join = await client.post(
+        f"/members/join/{token}",
+        json={
+            "email": "banks-member@example.com",
+            "password": "password123",
+            "first_name": "Bank",
+            "last_name": "Member",
+        },
+    )
+    login = await client.post(
+        "/auth/login", json={"email": "banks-member@example.com", "password": "password123"}
+    )
+    member_headers = {"Authorization": f"Bearer {login.json()['data']['access_token']}"}
+
+    resp = await client.get("/banks", headers=member_headers)
+    assert resp.status_code == 403
+
+
 async def test_settlement_save_success_and_masked_get(client, db_session):
     org, group, headers, purse_id = await _setup_purse_with_paid_contribution(client, db_session)
     await _register_settlement_account(client, group.id, headers)

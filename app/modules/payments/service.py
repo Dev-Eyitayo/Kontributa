@@ -157,15 +157,23 @@ class MonnifyClient:
             paid_on=parse_monnify_datetime(paid_on_raw) if paid_on_raw else None,
         )
 
-    async def get_bank_name(self, bank_code: str) -> str:
-        """Resolves a bank code to its display name via Monnify's bank
-        reference-data list. Falls back to echoing the code if not found."""
+    async def list_banks(self) -> list[dict]:
+        """Full bank reference list from Monnify -- get_bank_name() below
+        resolves a single code from this same call rather than duplicating
+        the integration, and the /banks endpoint (app/modules/banks) uses
+        this for its Redis-cached response."""
         banks = await self._request("GET", "/api/v1/banks")
         if isinstance(banks, dict):
             banks = banks.get("banks", [])
+        return [{"bank_code": b.get("code", ""), "bank_name": b.get("name", "")} for b in banks]
+
+    async def get_bank_name(self, bank_code: str) -> str:
+        """Resolves a bank code to its display name via Monnify's bank
+        reference-data list. Falls back to echoing the code if not found."""
+        banks = await self.list_banks()
         for bank in banks:
-            if bank.get("code") == bank_code:
-                return bank.get("name", bank_code)
+            if bank["bank_code"] == bank_code:
+                return bank["bank_name"]
         return bank_code
 
     async def verify_account_name(self, account_number: str, bank_code: str) -> MonnifyAccountName:

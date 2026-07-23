@@ -4,6 +4,7 @@ import hmac
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 import httpx
 
@@ -15,6 +16,13 @@ from app.modules.payments.schemas import (
     MonnifyTransactionStatus,
     MonnifyTransferResult,
 )
+
+# Confirmed against sandbox: invoice/create's expiryDate is read as
+# Africa/Lagos (WAT, UTC+1, no DST) wall-clock time, not UTC -- an
+# unconverted UTC timestamp is silently 1h "in the past" from Monnify's
+# side, which sandbox rejects outright as "Invalid invoice expiry date"
+# once the buffer is smaller than that offset.
+_MONNIFY_TZ = ZoneInfo("Africa/Lagos")
 
 
 class MonnifyError(AppException):
@@ -127,7 +135,7 @@ class MonnifyClient:
                 "contractCode": self._contract_code,
                 "customerEmail": customer_email,
                 "customerName": customer_name,
-                "expiryDate": expires_at.strftime("%Y-%m-%d %H:%M:%S"),
+                "expiryDate": expires_at.astimezone(_MONNIFY_TZ).strftime("%Y-%m-%d %H:%M:%S"),
             },
         )
         return MonnifyInvoice(

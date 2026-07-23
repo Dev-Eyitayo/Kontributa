@@ -217,6 +217,7 @@ async def list_contributions(
     return success_response(
         [
             {
+                "id": str(contribution.id),
                 "member_id": str(member.id),
                 "name": f"{user.first_name} {user.last_name}",
                 "member_id_number": member.member_id_number,

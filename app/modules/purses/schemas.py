@@ -48,6 +48,7 @@ class AddMemberToPurseResponse(BaseModel):
 
 
 class ContributionListItem(BaseModel):
+    id: UUID
     member_id: UUID
     name: str
     member_id_number: Optional[str] = None

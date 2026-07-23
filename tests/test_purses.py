@@ -81,7 +81,16 @@ async def test_create_purse_generates_pending_contributions_for_existing_members
     assert rows[0]["status"] == "pending"
     assert rows[0]["amount_received"] == "0.00"
     # transparency view must never leak more than name + member_id_number
-    assert set(rows[0].keys()) == {"member_id", "name", "member_id_number", "status", "amount_received", "paid_at"}
+
+    assert set(rows[0].keys()) == {
+        "id",
+        "member_id",
+        "name",
+        "member_id_number",
+        "status",
+        "amount_received",
+        "paid_at",
+    }
 
     member_purses = await client.get("/members/me/purses", headers=member_headers)
     assert member_purses.status_code == 200

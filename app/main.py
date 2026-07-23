@@ -44,13 +44,22 @@ async def app_exception_handler(request: Request, exc: AppException):
     return error_response(exc.code, exc.message, status_code=exc.status_code, details=exc.details)
 
 
+def _validation_message(errors: list) -> str:
+    parts = []
+    for err in errors:
+        field = ".".join(str(p) for p in err.get("loc", []) if p != "body")
+        parts.append(f"{field}: {err['msg']}" if field else err["msg"])
+    return "; ".join(parts) if parts else "request validation failed"
+
+
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    errors = exc.errors()
     return error_response(
         "validation_error",
-        "request validation failed",
+        _validation_message(errors),
         status_code=422,
-        details=exc.errors(),
+        details=errors,
     )
 
 

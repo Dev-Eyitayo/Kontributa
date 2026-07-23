@@ -17,6 +17,7 @@ class ContributionDetailResponse(BaseModel):
     amount_received: str
     account_number: Optional[str] = None
     invoice_expires_at: Optional[datetime] = None
+    paid_at: Optional[datetime] = None
 
 
 class GenerateInvoiceResponse(BaseModel):

@@ -49,6 +49,27 @@ async def list_groups(
     )
 
 
+@admin_router.get("/organizations", response_model=StandardResponse[list[AdminOrganizationResponse]])
+async def list_all_organizations(
+    _: CurrentUser = Depends(get_current_admin_user),
+    service: OrganizationService = Depends(get_organization_service),
+) -> JSONResponse:
+    orgs = await service.list_all_organizations()
+    return success_response(
+        [
+            {
+                "id": str(o.id),
+                "name": o.name,
+                "short_code": o.short_code,
+                "org_type": o.org_type.value,
+                "active": o.active,
+                "member_id_format": o.member_id_format,
+            }
+            for o in orgs
+        ]
+    )
+
+
 @admin_router.post("/organizations", status_code=201, response_model=StandardResponse[AdminOrganizationResponse])
 async def create_organization(
     payload: AdminCreateOrganizationRequest,

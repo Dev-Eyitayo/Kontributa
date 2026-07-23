@@ -3,7 +3,7 @@ import json
 from typing import Any, Optional
 from uuid import UUID
 
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import ForbiddenError, NotFoundError
@@ -183,8 +183,8 @@ class AuditService:
         return list(result.scalars().all())
 
     async def group_feed_for_platform_admin(
-        self, group_id: UUID, from_ts=None, to_ts=None
-    ) -> list[AuditLog]:
+        self, group_id: UUID, from_ts=None, to_ts=None, limit: int = 20, offset: int = 0
+    ) -> tuple[list[AuditLog], int]:
         """Cross-entity audit feed for an entire group -- admin oversight
         view. Covers purse edits, and every contribution/payout/settlement
         event tied to a purse or payout in this group."""
@@ -223,8 +223,9 @@ class AuditService:
         if to_ts is not None:
             stmt = stmt.where(AuditLog.created_at <= to_ts)
 
-        result = await self.db.execute(stmt.order_by(AuditLog.created_at, AuditLog.id))
-        return list(result.scalars().all())
+        total = (await self.db.execute(select(func.count()).select_from(stmt.subquery()))).scalar_one()
+        result = await self.db.execute(stmt.order_by(AuditLog.created_at, AuditLog.id).limit(limit).offset(offset))
+        return list(result.scalars().all()), total
 
     async def _entity_history(self, entity_type: str, entity_id: UUID) -> list[AuditLog]:
         result = await self.db.execute(

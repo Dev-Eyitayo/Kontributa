@@ -83,6 +83,34 @@ async def test_create_group_under_unknown_organization_returns_404(client, db_se
     assert resp.json()["error"]["code"] == "not_found"
 
 
+async def test_admin_list_organizations_requires_admin_error_envelope(client, db_session):
+    org, _ = await create_org_and_group(db_session)
+    resp = await client.get("/admin/organizations")
+    assert resp.status_code == 401
+    assert resp.json()["error"]["code"] == "missing_token"
+
+
+async def test_admin_list_organizations_includes_inactive_and_full_shape(client, db_session):
+    headers = await _admin_headers(db_session)
+    org, _ = await create_org_and_group(db_session)
+
+    deactivate = await client.patch(
+        f"/admin/organizations/{org.id}", json={"active": False}, headers=headers
+    )
+    assert deactivate.status_code == 200
+
+    public_listing = await client.get("/organizations")
+    assert org.name not in [o["name"] for o in public_listing.json()["data"]]
+
+    admin_listing = await client.get("/admin/organizations", headers=headers)
+    assert admin_listing.status_code == 200
+    rows = admin_listing.json()["data"]
+    row = next(r for r in rows if r["name"] == org.name)
+    assert row["active"] is False
+    assert row["org_type"] == "school"
+    assert "member_id_format" in row
+
+
 async def test_patch_organization_can_configure_member_id_format(client, db_session):
     headers = await _admin_headers(db_session)
     org, _ = await create_org_and_group(db_session)

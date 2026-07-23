@@ -3,7 +3,7 @@ from decimal import Decimal
 from typing import Optional
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import (
@@ -159,20 +159,26 @@ class PurseService:
 
         return contribution
 
-    async def list_for_admin(self, admin: GroupAdmin, status: Optional[str] = None) -> list[Purse]:
+    async def list_for_admin(
+        self, admin: GroupAdmin, status: Optional[str] = None, limit: int = 20, offset: int = 0
+    ) -> tuple[list[Purse], int]:
         stmt = select(Purse).where(Purse.group_id == admin.group_id)
         if status is not None:
             stmt = stmt.where(Purse.status == status)
-        result = await self.db.execute(stmt.order_by(Purse.created_at.desc()))
-        return list(result.scalars().all())
+        total = (await self.db.execute(select(func.count()).select_from(stmt.subquery()))).scalar_one()
+        result = await self.db.execute(stmt.order_by(Purse.created_at.desc()).limit(limit).offset(offset))
+        return list(result.scalars().all()), total
 
-    async def list_for_member(self, member: Member, status: Optional[str] = None) -> list[tuple[Purse, str]]:
+    async def list_for_member(
+        self, member: Member, status: Optional[str] = None, limit: int = 20, offset: int = 0
+    ) -> tuple[list[tuple[Purse, str]], int]:
         """Purses the member is eligible for, i.e. has a Contribution row for."""
         rows = await self.contributions.list_member_purses(member.id)
         result = [(purse, contribution.status.value) for contribution, purse in rows]
         if status is not None:
             result = [(purse, cstatus) for purse, cstatus in result if purse.status.value == status]
-        return result
+        total = len(result)
+        return result[offset : offset + limit], total
 
     async def get_detail(self, purse_id: UUID) -> Purse:
         return await self.get_by_id(purse_id)

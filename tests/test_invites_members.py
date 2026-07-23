@@ -219,9 +219,9 @@ async def test_group_admin_can_list_members_who_joined_via_invite(client, db_ses
 
     members = await client.get("/group-admins/members", headers=headers)
     assert members.status_code == 200
-    assert len(members.json()["data"]) == 1
-    assert members.json()["data"][0]["name"] == "Traceable Member"
-    assert members.json()["data"][0]["invite_source"] is not None
+    assert len(members.json()["data"]["items"]) == 1
+    assert members.json()["data"]["items"][0]["name"] == "Traceable Member"
+    assert members.json()["data"]["items"][0]["invite_source"] is not None
 
 
 async def test_join_anonymous_rejects_existing_email_even_for_a_different_group(client, db_session):

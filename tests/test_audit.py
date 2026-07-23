@@ -186,8 +186,31 @@ async def test_group_audit_feed_is_admin_only(client, db_session):
 
     admin_view = await client.get(f"/audit/groups/{group.id}", headers=admin_headers)
     assert admin_view.status_code == 200
-    entity_types = {e["entity_type"] for e in admin_view.json()["data"]}
+    entity_types = {e["entity_type"] for e in admin_view.json()["data"]["items"]}
     assert "contribution" in entity_types
+
+
+async def test_group_audit_feed_pagination(client, db_session):
+    from app.core.auth import create_access_token
+    from tests.conftest import create_platform_admin
+
+    org, group, headers, member_headers, purse_id, contribution_id = await _setup_purse_with_paid_contribution(
+        client, db_session
+    )
+
+    admin = await create_platform_admin(db_session)
+    token = create_access_token(admin.id, "group_admin")
+    admin_headers = {"Authorization": f"Bearer {token.token}"}
+
+    full = await client.get(f"/audit/groups/{group.id}", headers=admin_headers)
+    total = full.json()["data"]["total"]
+    assert total >= 1
+
+    limited = await client.get(f"/audit/groups/{group.id}?limit=1&offset=0", headers=admin_headers)
+    body = limited.json()["data"]
+    assert body["total"] == total
+    assert body["limit"] == 1
+    assert len(body["items"]) == 1
 
 
 async def test_verify_chain_detects_a_directly_inserted_tampered_row(client, db_session):

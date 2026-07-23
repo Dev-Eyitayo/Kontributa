@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -8,6 +8,7 @@ from app.core.auth import CurrentUser, get_current_user
 from app.core.db import get_db
 from app.core.exceptions import ForbiddenError
 from app.core.idempotency import IdempotencyStore, fingerprint, get_idempotency_key, get_idempotency_store
+from app.core.pagination import DEFAULT_LIMIT, MAX_LIMIT, Paginated
 from app.core.response import StandardResponse, success_response
 from app.modules.auth.models import User
 from app.modules.contributions.models import Contribution
@@ -47,6 +48,7 @@ def _contribution_out(c: Contribution) -> dict:
         "amount_received": str(c.amount_received),
         "account_number": c.account_number,
         "invoice_expires_at": c.invoice_expires_at.isoformat() if c.invoice_expires_at else None,
+        "paid_at": c.paid_at.isoformat() if c.paid_at else None,
     }
 
 
@@ -154,9 +156,11 @@ async def mark_manual(
     return JSONResponse(status_code=200, content=envelope_body)
 
 
-@router.get("/{contribution_id}/history", response_model=StandardResponse[list[ContributionHistoryItem]])
+@router.get("/{contribution_id}/history", response_model=StandardResponse[Paginated[ContributionHistoryItem]])
 async def get_history(
     contribution_id: UUID,
+    limit: int = Query(default=DEFAULT_LIMIT, ge=1, le=MAX_LIMIT),
+    offset: int = Query(default=0, ge=0),
     current_user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     service: ContributionService = Depends(get_contribution_service),
@@ -168,19 +172,24 @@ async def get_history(
     else:
         await _assert_member_owns(db, current_user, contribution)
 
-    events = await service.list_history(contribution_id)
+    events, total = await service.list_history(contribution_id, limit, offset)
     return success_response(
-        [
-            {
-                "from_status": e.from_status.value,
-                "to_status": e.to_status.value,
-                "actor_type": e.actor_type.value,
-                "actor_id": str(e.actor_id) if e.actor_id else None,
-                "note": e.note,
-                "created_at": e.created_at.isoformat(),
-            }
-            for e in events
-        ]
+        {
+            "items": [
+                {
+                    "from_status": e.from_status.value,
+                    "to_status": e.to_status.value,
+                    "actor_type": e.actor_type.value,
+                    "actor_id": str(e.actor_id) if e.actor_id else None,
+                    "note": e.note,
+                    "created_at": e.created_at.isoformat(),
+                }
+                for e in events
+            ],
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+        }
     )
 
 

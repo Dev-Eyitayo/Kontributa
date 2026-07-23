@@ -132,9 +132,17 @@ async def test_generate_invoice_regenerates_after_expiry(client, db_session):
     assert len(_state["monnify"].created_invoices) == 2
 
     history = await client.get(f"/contributions/{ctx['contribution_id']}/history", headers=ctx["admin_headers"])
-    transitions = [(e["from_status"], e["to_status"]) for e in history.json()["data"]]
+    transitions = [(e["from_status"], e["to_status"]) for e in history.json()["data"]["items"]]
     assert ("pending", "expired") in transitions
     assert ("expired", "pending") in transitions
+
+    limited = await client.get(
+        f"/contributions/{ctx['contribution_id']}/history?limit=1&offset=0", headers=ctx["admin_headers"]
+    )
+    body = limited.json()["data"]
+    assert body["total"] == 2
+    assert body["limit"] == 1
+    assert len(body["items"]) == 1
 
 
 async def test_webhook_wrong_signature_rejected(client, db_session):
@@ -170,6 +178,7 @@ async def test_webhook_correct_signature_moves_pending_to_paid(client, db_sessio
     detail = await client.get(f"/contributions/{ctx['contribution_id']}", headers=ctx["member_headers"])
     assert detail.json()["data"]["status"] == "paid"
     assert detail.json()["data"]["amount_received"] == "2500.00"
+    assert detail.json()["data"]["paid_at"] is not None
 
 
 async def test_webhook_duplicate_delivery_processed_once(client, db_session):
@@ -188,7 +197,7 @@ async def test_webhook_duplicate_delivery_processed_once(client, db_session):
     assert second.status_code == 202
 
     history = await client.get(f"/contributions/{ctx['contribution_id']}/history", headers=ctx["admin_headers"])
-    paid_transitions = [e for e in history.json()["data"] if e["to_status"] == "paid"]
+    paid_transitions = [e for e in history.json()["data"]["items"] if e["to_status"] == "paid"]
     assert len(paid_transitions) == 1
 
 
@@ -234,9 +243,12 @@ async def test_mark_manual_is_distinct_from_webhook_paid(client, db_session):
     assert resp.json()["data"]["status"] == "paid_manual"
 
     history = await client.get(f"/contributions/{ctx['contribution_id']}/history", headers=ctx["admin_headers"])
-    events = history.json()["data"]
+    events = history.json()["data"]["items"]
     assert events[-1]["actor_type"] == "rep_manual"
     assert events[-1]["to_status"] == "paid_manual"
+
+    detail = await client.get(f"/contributions/{ctx['contribution_id']}", headers=ctx["member_headers"])
+    assert detail.json()["data"]["paid_at"] is not None
 
 
 async def test_mark_manual_idempotency_key_prevents_double_count(client, db_session):

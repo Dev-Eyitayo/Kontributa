@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime, timezone
 from uuid import UUID
 
@@ -8,12 +9,29 @@ from app.core.exceptions import BusinessRuleError
 from app.modules.audit.models import AuditActorType
 from app.modules.audit.service import AuditService
 from app.modules.group_admins.models import GroupAdmin
-from app.modules.payments.service import MonnifyClient
+from app.modules.payments.service import MonnifyClient, MonnifyError
 from app.modules.settlement.models import SettlementAccount
+
+logger = logging.getLogger("kontributa.settlement")
 
 
 def _normalize(name: str) -> str:
     return " ".join(name.strip().lower().split())
+
+
+async def _verify_account_name(monnify: MonnifyClient, account_number: str, bank_code: str):
+    """Wraps MonnifyClient.verify_account_name so the raw upstream error
+    (which includes the request path/query string) never reaches a client
+    response -- logged in full server-side, replaced with a clean, actionable
+    message and a 4xx instead of MonnifyError's 502."""
+    try:
+        return await monnify.verify_account_name(account_number, bank_code)
+    except MonnifyError as exc:
+        logger.warning("account verification failed for %s/%s: %s", bank_code, account_number, exc)
+        raise BusinessRuleError(
+            "could not verify this account -- check that the account number and bank are correct",
+            code="account_verification_failed",
+        ) from exc
 
 
 class SettlementService:
@@ -24,7 +42,7 @@ class SettlementService:
     async def lookup(
         self, monnify: MonnifyClient, admin: GroupAdmin, bank_code: str, account_number: str
     ) -> dict:
-        resolved = await monnify.verify_account_name(account_number, bank_code)
+        resolved = await _verify_account_name(monnify, account_number, bank_code)
 
         # Every verification attempt is a meaningful audit fact, even this
         # preview-only call that saves nothing -- logged and committed on
@@ -62,7 +80,7 @@ class SettlementService:
         account_number: str,
         confirmed_account_name: str,
     ) -> SettlementAccount:
-        resolved = await monnify.verify_account_name(account_number, bank_code)
+        resolved = await _verify_account_name(monnify, account_number, bank_code)
 
         if not resolved.account_name or _normalize(resolved.account_name) != _normalize(confirmed_account_name):
             # A failed verification attempt is itself a meaningful audit

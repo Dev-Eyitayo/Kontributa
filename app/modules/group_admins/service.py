@@ -67,15 +67,17 @@ class GroupAdminService:
         admin = await self.get_by_user_id(user_id)
         return await self.invites.create(admin.id, admin.group_id, payload)
 
-    async def list_invite_links(self, user_id: UUID) -> list[InviteLink]:
+    async def list_invite_links(self, user_id: UUID, limit: int, offset: int) -> tuple[list[InviteLink], int]:
         admin = await self.get_by_user_id(user_id)
-        return await self.invites.list_for_admin(admin.id)
+        return await self.invites.list_for_admin(admin.id, limit, offset)
 
     async def revoke_invite_link(self, user_id: UUID, invite_id: UUID) -> InviteLink:
         admin = await self.get_by_user_id(user_id)
         return await self.invites.revoke(admin.id, invite_id)
 
-    async def list_members(self, user_id: UUID, cohort: Optional[str] = None) -> list[tuple[Member, User]]:
+    async def list_members(
+        self, user_id: UUID, cohort: Optional[str] = None, limit: int = 20, offset: int = 0
+    ) -> tuple[list[tuple[Member, User]], int]:
         admin = await self.get_by_user_id(user_id)
 
         stmt = select(Member, User).join(User, Member.user_id == User.id).where(Member.group_id == admin.group_id)
@@ -84,5 +86,6 @@ class GroupAdminService:
         if cohort is not None:
             stmt = stmt.where(Member.cohort == cohort)
 
-        result = await self.db.execute(stmt.order_by(Member.created_at))
-        return [(row[0], row[1]) for row in result.all()]
+        total = (await self.db.execute(select(func.count()).select_from(stmt.subquery()))).scalar_one()
+        result = await self.db.execute(stmt.order_by(Member.created_at).limit(limit).offset(offset))
+        return [(row[0], row[1]) for row in result.all()], total

@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta, timezone
 
-from tests.conftest import create_org_and_group, find_redis_token
+from app.core.auth import create_access_token
+from tests.conftest import create_org_and_group, create_platform_admin, find_redis_token
 
 
 async def _register_and_login_group_admin(client, email="rep@example.com"):
@@ -76,7 +77,7 @@ async def test_create_purse_generates_pending_contributions_for_existing_members
 
     contributions = await client.get(f"/purses/{purse_id}/contributions", headers=headers)
     assert contributions.status_code == 200
-    rows = contributions.json()["data"]
+    rows = contributions.json()["data"]["items"]
     assert len(rows) == 1
     assert rows[0]["status"] == "pending"
     assert rows[0]["amount_received"] == "0.00"
@@ -194,7 +195,7 @@ async def test_editing_amount_only_updates_pending_contributions(client, db_sess
     purse_id = create.json()["data"]["id"]
 
     contributions_before = await client.get(f"/purses/{purse_id}/contributions", headers=headers)
-    paid_member_id = contributions_before.json()["data"][0]["member_id"]
+    paid_member_id = contributions_before.json()["data"]["items"][0]["member_id"]
 
     # Directly flip one contribution to paid via the DB, since Monnify integration doesn't exist yet.
     from sqlalchemy import select
@@ -214,7 +215,7 @@ async def test_editing_amount_only_updates_pending_contributions(client, db_sess
     assert patch.json()["data"]["amount"] == "1500.00"
 
     contributions_after = await client.get(f"/purses/{purse_id}/contributions", headers=headers)
-    rows = {r["member_id"]: r for r in contributions_after.json()["data"]}
+    rows = {r["member_id"]: r for r in contributions_after.json()["data"]["items"]}
 
     assert rows[paid_member_id]["status"] == "paid"
     assert rows[paid_member_id]["amount_received"] == "1000.00"
@@ -279,6 +280,32 @@ async def test_rep_cannot_manage_another_reps_purse(client, db_session):
     assert forbidden.status_code == 403
     assert forbidden.json()["error"]["code"] == "forbidden"
 
+    forbidden_contributions = await client.get(f"/purses/{purse_id}/contributions", headers=headers_b)
+    assert forbidden_contributions.status_code == 403
+    assert forbidden_contributions.json()["error"]["code"] == "forbidden"
+
+
+async def test_platform_admin_can_list_contributions_for_any_purse(client, db_session):
+    # A platform admin has no GroupAdmin profile row -- D4 (Flagged
+    # Contributions) clicks through to this exact endpoint for
+    # human-readable context, so it must not 404/403 for them the way it
+    # correctly does for an unrelated group admin (see the test above).
+    org, group, headers = await _setup_group_with_admin(client, db_session)
+    create = await client.post(
+        "/purses",
+        json={"title": "Cross-group visible fee", "amount": "500.00", "deadline": _future_deadline(), "enroll_mode": "snapshot"},
+        headers=headers,
+    )
+    purse_id = create.json()["data"]["id"]
+
+    admin = await create_platform_admin(db_session)
+    token = create_access_token(admin.id, "group_admin")
+    admin_headers = {"Authorization": f"Bearer {token.token}"}
+
+    resp = await client.get(f"/purses/{purse_id}/contributions", headers=admin_headers)
+    assert resp.status_code == 200
+    assert resp.json()["success"] is True
+
 
 async def test_same_group_admin_can_manage_purse_they_did_not_create(client, db_session):
     org, group, headers_a = await _setup_group_with_admin(client, db_session)
@@ -328,7 +355,7 @@ async def test_create_purse_idempotency_key_prevents_duplicate(client, db_sessio
     assert first.json()["data"]["id"] == second.json()["data"]["id"]
 
     admin_purses = await client.get("/purses", headers=headers)
-    matching = [p for p in admin_purses.json()["data"] if p["title"] == "Idempotent Fee"]
+    matching = [p for p in admin_purses.json()["data"]["items"] if p["title"] == "Idempotent Fee"]
     assert len(matching) == 1
 
 
@@ -362,12 +389,12 @@ async def test_purse_list_and_detail_role_aware_shapes(client, db_session):
     purse_id = create.json()["data"]["id"]
 
     rep_list = await client.get("/purses", headers=headers)
-    assert "paid_count" in rep_list.json()["data"][0]
-    assert "total_count" in rep_list.json()["data"][0]
+    assert "paid_count" in rep_list.json()["data"]["items"][0]
+    assert "total_count" in rep_list.json()["data"]["items"][0]
 
     member_list = await client.get("/purses", headers=member_headers)
-    assert "contribution_status" in member_list.json()["data"][0]
-    assert "paid_count" not in member_list.json()["data"][0]
+    assert "contribution_status" in member_list.json()["data"]["items"][0]
+    assert "paid_count" not in member_list.json()["data"]["items"][0]
 
     rep_detail = await client.get(f"/purses/{purse_id}", headers=headers)
     assert rep_detail.json()["data"]["enroll_mode"] == "snapshot"
@@ -610,3 +637,52 @@ async def test_add_member_to_purse_rejects_member_outside_group(client, db_sessi
         f"/purses/{purse_id}/contributions", json={"member_id": other_member_id}, headers=headers_a
     )
     assert resp.status_code == 404
+
+
+async def test_purse_list_pagination(client, db_session):
+    org, group, headers = await _setup_group_with_admin(client, db_session)
+
+    for i in range(3):
+        await client.post(
+            "/purses",
+            json={"title": f"Fee {i}", "amount": "500.00", "deadline": _future_deadline(), "enroll_mode": "snapshot"},
+            headers=headers,
+        )
+
+    first_page = await client.get("/purses?limit=2&offset=0", headers=headers)
+    assert first_page.status_code == 200
+    body = first_page.json()["data"]
+    assert body["total"] == 3
+    assert body["limit"] == 2
+    assert body["offset"] == 0
+    assert len(body["items"]) == 2
+
+    second_page = await client.get("/purses?limit=2&offset=2", headers=headers)
+    body_2 = second_page.json()["data"]
+    assert len(body_2["items"]) == 1
+
+    bad_limit = await client.get("/purses?limit=0", headers=headers)
+    assert bad_limit.status_code == 422
+
+
+async def test_purse_contributions_pagination(client, db_session):
+    org, group, headers = await _setup_group_with_admin(client, db_session)
+    await _invite_and_join_member(client, headers, email="pg1@example.com")
+    await _invite_and_join_member(client, headers, email="pg2@example.com")
+    await _invite_and_join_member(client, headers, email="pg3@example.com")
+
+    create = await client.post(
+        "/purses",
+        json={"title": "Paginated Fee", "amount": "500.00", "deadline": _future_deadline(), "enroll_mode": "snapshot"},
+        headers=headers,
+    )
+    purse_id = create.json()["data"]["id"]
+
+    first_page = await client.get(f"/purses/{purse_id}/contributions?limit=2&offset=0", headers=headers)
+    body = first_page.json()["data"]
+    assert body["total"] == 3
+    assert len(body["items"]) == 2
+
+    second_page = await client.get(f"/purses/{purse_id}/contributions?limit=2&offset=2", headers=headers)
+    body_2 = second_page.json()["data"]
+    assert len(body_2["items"]) == 1

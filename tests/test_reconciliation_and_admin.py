@@ -4,7 +4,7 @@ from decimal import Decimal
 from sqlalchemy import select
 
 from app.core.auth import create_access_token
-from app.modules.contributions.models import Contribution
+from app.modules.contributions.models import Contribution, ContributionStatus
 from app.modules.payments.schemas import MonnifyTransactionStatus
 from tests.conftest import _state, create_platform_admin
 from tests.test_contributions_and_webhooks import _generate_invoice, _setup_purse_with_member
@@ -56,7 +56,7 @@ async def test_reconciliation_recovers_dropped_webhook(client, db_session):
     assert detail.json()["data"]["status"] == "paid"
 
     history = await client.get(f"/contributions/{ctx['contribution_id']}/history", headers=ctx["admin_headers"])
-    events = history.json()["data"]
+    events = history.json()["data"]["items"]
     assert events[-1]["actor_type"] == "reconciliation_job"
     assert events[-1]["to_status"] == "paid"
 
@@ -84,7 +84,7 @@ async def test_reconciliation_run_twice_does_not_double_apply(client, db_session
     assert second.json()["data"] == {"checked": 0, "updated": 0}
 
     history = await client.get(f"/contributions/{ctx['contribution_id']}/history", headers=ctx["admin_headers"])
-    paid_transitions = [e for e in history.json()["data"] if e["to_status"] == "paid"]
+    paid_transitions = [e for e in history.json()["data"]["items"] if e["to_status"] == "paid"]
     assert len(paid_transitions) == 1
 
 
@@ -150,15 +150,15 @@ async def test_admin_webhook_events_and_flagged_contributions(client, db_session
 
     events = await client.get("/admin/webhook-events", headers=admin_headers)
     assert events.status_code == 200
-    assert len(events.json()["data"]) == 1
-    assert events.json()["data"][0]["processed"] is True
-    assert events.json()["data"][0]["signature_valid"] is True
+    assert len(events.json()["data"]["items"]) == 1
+    assert events.json()["data"]["items"][0]["processed"] is True
+    assert events.json()["data"]["items"][0]["signature_valid"] is True
 
     flagged = await client.get("/admin/contributions/flagged", headers=admin_headers)
     assert flagged.status_code == 200
-    assert len(flagged.json()["data"]) == 1
-    assert flagged.json()["data"][0]["id"] == ctx["contribution_id"]
-    assert flagged.json()["data"][0]["amount_received"] == "2000.00"
+    assert len(flagged.json()["data"]["items"]) == 1
+    assert flagged.json()["data"]["items"][0]["id"] == ctx["contribution_id"]
+    assert flagged.json()["data"]["items"][0]["amount_received"] == "2000.00"
 
 
 async def test_admin_endpoints_require_admin_role(client, db_session):
@@ -167,3 +167,46 @@ async def test_admin_endpoints_require_admin_role(client, db_session):
     assert events.status_code == 403
     flagged = await client.get("/admin/contributions/flagged", headers=ctx["admin_headers"])
     assert flagged.status_code == 403
+
+
+async def test_webhook_events_pagination(client, db_session):
+    import uuid
+
+    from app.modules.webhooks.models import WebhookEvent
+
+    for i in range(3):
+        db_session.add(
+            WebhookEvent(
+                id=uuid.uuid4(),
+                provider_event_id=f"pagination-evt-{i}",
+                raw_payload="{}",
+                signature_valid=True,
+                processed=True,
+            )
+        )
+    await db_session.commit()
+
+    admin_headers = await _admin_headers(db_session)
+    first_page = await client.get("/admin/webhook-events?limit=2&offset=0", headers=admin_headers)
+    body = first_page.json()["data"]
+    assert body["total"] == 3
+    assert len(body["items"]) == 2
+
+    second_page = await client.get("/admin/webhook-events?limit=2&offset=2", headers=admin_headers)
+    assert len(second_page.json()["data"]["items"]) == 1
+
+
+async def test_flagged_contributions_pagination(client, db_session):
+    ctx = await _setup_purse_with_member(client, db_session, amount="2500.00")
+    result = await db_session.execute(select(Contribution).where(Contribution.id == ctx["contribution_id"]))
+    contribution = result.scalar_one()
+    contribution.status = ContributionStatus.FLAGGED_FOR_REVIEW
+    contribution.amount_received = Decimal("100.00")
+    await db_session.commit()
+
+    admin_headers = await _admin_headers(db_session)
+    page = await client.get("/admin/contributions/flagged?limit=1&offset=0", headers=admin_headers)
+    body = page.json()["data"]
+    assert body["total"] == 1
+    assert body["limit"] == 1
+    assert len(body["items"]) == 1

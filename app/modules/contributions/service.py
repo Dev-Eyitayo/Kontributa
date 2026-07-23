@@ -108,8 +108,12 @@ class ContributionService:
             await self.db.commit()
 
     async def list_for_purse(
-        self, purse_id: UUID, status: Optional[ContributionStatus] = None
-    ) -> list[tuple[Contribution, Member, User]]:
+        self,
+        purse_id: UUID,
+        status: Optional[ContributionStatus] = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> tuple[list[tuple[Contribution, Member, User]], int]:
         stmt = (
             select(Contribution, Member, User)
             .join(Member, Contribution.member_id == Member.id)
@@ -119,8 +123,9 @@ class ContributionService:
         if status is not None:
             stmt = stmt.where(Contribution.status == status)
 
-        result = await self.db.execute(stmt.order_by(Contribution.created_at))
-        return [(row[0], row[1], row[2]) for row in result.all()]
+        total = (await self.db.execute(select(func.count()).select_from(stmt.subquery()))).scalar_one()
+        result = await self.db.execute(stmt.order_by(Contribution.created_at).limit(limit).offset(offset))
+        return [(row[0], row[1], row[2]) for row in result.all()], total
 
     async def summary_for_purse(self, purse_id: UUID) -> dict:
         stmt = select(Contribution.status, func.count(), func.coalesce(func.sum(Contribution.amount_received), 0)).where(
@@ -450,10 +455,10 @@ class ContributionService:
         await self.db.refresh(contribution)
         return contribution
 
-    async def list_history(self, contribution_id: UUID) -> list[ContributionEvent]:
-        result = await self.db.execute(
-            select(ContributionEvent)
-            .where(ContributionEvent.contribution_id == contribution_id)
-            .order_by(ContributionEvent.created_at)
-        )
-        return list(result.scalars().all())
+    async def list_history(
+        self, contribution_id: UUID, limit: int = 20, offset: int = 0
+    ) -> tuple[list[ContributionEvent], int]:
+        stmt = select(ContributionEvent).where(ContributionEvent.contribution_id == contribution_id)
+        total = (await self.db.execute(select(func.count()).select_from(stmt.subquery()))).scalar_one()
+        result = await self.db.execute(stmt.order_by(ContributionEvent.created_at).limit(limit).offset(offset))
+        return list(result.scalars().all()), total

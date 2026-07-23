@@ -15,7 +15,9 @@ from app.core.auth import (
 from app.core.db import get_db
 from app.core.exceptions import ForbiddenError
 from app.core.idempotency import IdempotencyStore, fingerprint, get_idempotency_key, get_idempotency_store
+from app.core.pagination import DEFAULT_LIMIT, MAX_LIMIT, Paginated
 from app.core.response import StandardResponse, success_response
+from app.modules.auth.models import User
 from app.modules.contributions.service import ContributionService
 from app.modules.group_admins.service import GroupAdminService
 from app.modules.members.service import MemberService
@@ -109,32 +111,46 @@ async def create_purse(
     return JSONResponse(status_code=201, content=envelope_body)
 
 
-@router.get("", response_model=StandardResponse[list[Union[PurseListItemAdminOut, PurseListItemMemberOut]]])
+@router.get(
+    "", response_model=StandardResponse[Union[Paginated[PurseListItemAdminOut], Paginated[PurseListItemMemberOut]]]
+)
 async def list_purses(
     status: Optional[str] = Query(default=None),
+    limit: int = Query(default=DEFAULT_LIMIT, ge=1, le=MAX_LIMIT),
+    offset: int = Query(default=0, ge=0),
     current_user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
     if current_user.role == "group_admin":
         admin = await GroupAdminService(db).get_by_user_id(current_user.id)
-        purses = await PurseService(db).list_for_admin(admin, status)
+        purses, total = await PurseService(db).list_for_admin(admin, status, limit, offset)
         purse_ids = [p.id for p in purses]
         counts = await ContributionService(db).counts_for_purses(purse_ids)
         return success_response(
-            [
-                {
-                    **_purse_out(p),
-                    "paid_count": counts.get(p.id, (0, 0))[0],
-                    "total_count": counts.get(p.id, (0, 0))[1],
-                }
-                for p in purses
-            ]
+            {
+                "items": [
+                    {
+                        **_purse_out(p),
+                        "paid_count": counts.get(p.id, (0, 0))[0],
+                        "total_count": counts.get(p.id, (0, 0))[1],
+                    }
+                    for p in purses
+                ],
+                "total": total,
+                "limit": limit,
+                "offset": offset,
+            }
         )
 
     member = await MemberService(db).get_by_user_id(current_user.id)
-    rows = await PurseService(db).list_for_member(member, status)
+    rows, total = await PurseService(db).list_for_member(member, status, limit, offset)
     return success_response(
-        [{**_purse_out(purse), "contribution_status": cstatus} for purse, cstatus in rows]
+        {
+            "items": [{**_purse_out(purse), "contribution_status": cstatus} for purse, cstatus in rows],
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+        }
     )
 
 
@@ -199,34 +215,53 @@ async def close_purse(
     return success_response({"id": str(purse.id), "status": purse.status.value})
 
 
-@router.get("/{purse_id}/contributions", response_model=StandardResponse[list[ContributionListItem]])
+@router.get("/{purse_id}/contributions", response_model=StandardResponse[Paginated[ContributionListItem]])
 async def list_contributions(
     purse_id: UUID,
     status: Optional[str] = Query(default=None),
+    limit: int = Query(default=DEFAULT_LIMIT, ge=1, le=MAX_LIMIT),
+    offset: int = Query(default=0, ge=0),
     current_user: CurrentUser = Depends(get_current_group_admin_user),
+    db: AsyncSession = Depends(get_db),
     purse_service: PurseService = Depends(get_purse_service),
     admin_service: GroupAdminService = Depends(get_group_admin_service),
     contribution_service: ContributionService = Depends(get_contribution_service),
 ) -> JSONResponse:
-    admin = await admin_service.get_by_user_id(current_user.id)
+    # A platform admin's JWT role claim is still "group_admin" (it's the
+    # is_platform_admin flag on User that actually distinguishes them) --
+    # and a platform admin has no GroupAdmin profile row, so check that
+    # flag first rather than assuming a "group_admin"-role token always
+    # has one. Mirrors audit/router.py::get_payout_audit's pattern -- this
+    # is also what lets D4 (Flagged Contributions) click through to a
+    # purse's transparency view as the platform admin viewing it.
+    user_row = await db.get(User, current_user.id)
     purse = await purse_service.get_by_id(purse_id)
-    if purse.group_id != admin.group_id:
-        raise ForbiddenError("cannot view contributions for a purse outside your group")
+    if user_row is not None and user_row.is_platform_admin:
+        pass
+    else:
+        admin = await admin_service.get_by_user_id(current_user.id)
+        if purse.group_id != admin.group_id:
+            raise ForbiddenError("cannot view contributions for a purse outside your group")
 
-    rows = await contribution_service.list_for_purse(purse_id, status)
+    rows, total = await contribution_service.list_for_purse(purse_id, status, limit, offset)
     return success_response(
-        [
-            {
-                "id": str(contribution.id),
-                "member_id": str(member.id),
-                "name": f"{user.first_name} {user.last_name}",
-                "member_id_number": member.member_id_number,
-                "status": contribution.status.value,
-                "amount_received": str(contribution.amount_received),
-                "paid_at": contribution.paid_at.isoformat() if contribution.paid_at else None,
-            }
-            for contribution, member, user in rows
-        ]
+        {
+            "items": [
+                {
+                    "id": str(contribution.id),
+                    "member_id": str(member.id),
+                    "name": f"{user.first_name} {user.last_name}",
+                    "member_id_number": member.member_id_number,
+                    "status": contribution.status.value,
+                    "amount_received": str(contribution.amount_received),
+                    "paid_at": contribution.paid_at.isoformat() if contribution.paid_at else None,
+                }
+                for contribution, member, user in rows
+            ],
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+        }
     )
 
 

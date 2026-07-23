@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.auth import CurrentUser, get_current_admin_user, get_current_user
 from app.core.db import get_db
 from app.core.exceptions import ForbiddenError
+from app.core.pagination import DEFAULT_LIMIT, MAX_LIMIT, Paginated
 from app.core.response import StandardResponse, success_response
 from app.modules.audit.models import AuditLog
 from app.modules.audit.schemas import (
@@ -122,25 +123,32 @@ async def get_payout_audit(
     return success_response([_payout_history_out(e) for e in entries])
 
 
-@router.get("/groups/{group_id}", response_model=StandardResponse[list[GroupAuditFeedEntry]])
+@router.get("/groups/{group_id}", response_model=StandardResponse[Paginated[GroupAuditFeedEntry]])
 async def get_group_audit_feed(
     group_id: UUID,
     from_: Optional[datetime] = Query(default=None, alias="from"),
     to: Optional[datetime] = Query(default=None),
+    limit: int = Query(default=DEFAULT_LIMIT, ge=1, le=MAX_LIMIT),
+    offset: int = Query(default=0, ge=0),
     _: CurrentUser = Depends(get_current_admin_user),
     service: AuditService = Depends(get_audit_service),
 ) -> JSONResponse:
-    entries = await service.group_feed_for_platform_admin(group_id, from_, to)
+    entries, total = await service.group_feed_for_platform_admin(group_id, from_, to, limit, offset)
     return success_response(
-        [
-            {
-                "entity_type": e.entity_type,
-                "entity_id": str(e.entity_id),
-                "action": e.action,
-                "actor_type": e.actor_type.value,
-                "actor_id": str(e.actor_id) if e.actor_id else None,
-                "created_at": e.created_at.isoformat(),
-            }
-            for e in entries
-        ]
+        {
+            "items": [
+                {
+                    "entity_type": e.entity_type,
+                    "entity_id": str(e.entity_id),
+                    "action": e.action,
+                    "actor_type": e.actor_type.value,
+                    "actor_id": str(e.actor_id) if e.actor_id else None,
+                    "created_at": e.created_at.isoformat(),
+                }
+                for e in entries
+            ],
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+        }
     )

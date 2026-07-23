@@ -91,15 +91,16 @@ async def test_invite_link_lifecycle(client, db_session):
 
     listing = await client.get("/group-admins/invite-links", headers=headers)
     assert listing.status_code == 200
-    assert len(listing.json()["data"]) == 1
-    assert listing.json()["data"][0]["active"] is True
+    assert listing.json()["data"]["total"] == 1
+    assert len(listing.json()["data"]["items"]) == 1
+    assert listing.json()["data"]["items"][0]["active"] is True
 
     revoke = await client.delete(f"/group-admins/invite-links/{invite_id}", headers=headers)
     assert revoke.status_code == 200
     assert revoke.json()["data"]["revoked"] is True
 
     listing_after = await client.get("/group-admins/invite-links", headers=headers)
-    assert listing_after.json()["data"][0]["active"] is False
+    assert listing_after.json()["data"]["items"][0]["active"] is False
 
 
 async def test_revoke_another_admins_invite_is_forbidden(client, db_session):
@@ -131,3 +132,70 @@ async def test_revoke_another_admins_invite_is_forbidden(client, db_session):
 async def test_members_endpoint_requires_group_admin_role(client, db_session):
     resp = await client.get("/group-admins/members", headers={"Authorization": f"Bearer {uuid.uuid4()}"})
     assert resp.status_code == 401
+
+
+async def test_invite_links_pagination(client, db_session):
+    org, group = await create_org_and_group(db_session)
+    headers = await _register_and_login_group_admin(client)
+    await client.post(
+        "/group-admins/onboard",
+        json={"organization_id": str(org.id), "group_id": str(group.id)},
+        headers=headers,
+    )
+
+    for _ in range(3):
+        await client.post("/group-admins/invite-links", json={"expires_in_days": 7}, headers=headers)
+
+    first_page = await client.get("/group-admins/invite-links?limit=2&offset=0", headers=headers)
+    assert first_page.status_code == 200
+    body = first_page.json()["data"]
+    assert body["total"] == 3
+    assert body["limit"] == 2
+    assert body["offset"] == 0
+    assert len(body["items"]) == 2
+
+    second_page = await client.get("/group-admins/invite-links?limit=2&offset=2", headers=headers)
+    body_2 = second_page.json()["data"]
+    assert body_2["total"] == 3
+    assert len(body_2["items"]) == 1
+
+    default_page = await client.get("/group-admins/invite-links", headers=headers)
+    default_body = default_page.json()["data"]
+    assert default_body["limit"] == 20
+    assert len(default_body["items"]) == 3
+
+    over_limit = await client.get("/group-admins/invite-links?limit=500", headers=headers)
+    assert over_limit.status_code == 422
+
+
+async def test_members_pagination(client, db_session):
+    org, group = await create_org_and_group(db_session)
+    headers = await _register_and_login_group_admin(client)
+    await client.post(
+        "/group-admins/onboard",
+        json={"organization_id": str(org.id), "group_id": str(group.id)},
+        headers=headers,
+    )
+    invite = await client.post("/group-admins/invite-links", json={"expires_in_days": 7}, headers=headers)
+    token = invite.json()["data"]["token"]
+
+    for n in range(3):
+        await client.post(
+            f"/members/join/{token}",
+            json={
+                "email": f"page-member-{n}@example.com",
+                "password": "password123",
+                "first_name": "Member",
+                "last_name": str(n),
+            },
+        )
+
+    first_page = await client.get("/group-admins/members?limit=2&offset=0", headers=headers)
+    assert first_page.status_code == 200
+    body = first_page.json()["data"]
+    assert body["total"] == 3
+    assert len(body["items"]) == 2
+
+    second_page = await client.get("/group-admins/members?limit=2&offset=2", headers=headers)
+    body_2 = second_page.json()["data"]
+    assert len(body_2["items"]) == 1

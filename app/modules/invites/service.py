@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -90,13 +90,11 @@ class InviteService:
         await self.db.refresh(invite)
         return invite
 
-    async def list_for_admin(self, group_admin_id: UUID) -> list[InviteLink]:
-        result = await self.db.execute(
-            select(InviteLink)
-            .where(InviteLink.created_by_group_admin_id == group_admin_id)
-            .order_by(InviteLink.created_at.desc())
-        )
-        return list(result.scalars().all())
+    async def list_for_admin(self, group_admin_id: UUID, limit: int, offset: int) -> tuple[list[InviteLink], int]:
+        stmt = select(InviteLink).where(InviteLink.created_by_group_admin_id == group_admin_id)
+        total = (await self.db.execute(select(func.count()).select_from(stmt.subquery()))).scalar_one()
+        result = await self.db.execute(stmt.order_by(InviteLink.created_at.desc()).limit(limit).offset(offset))
+        return list(result.scalars().all()), total
 
     async def revoke(self, group_admin_id: UUID, invite_id: UUID) -> InviteLink:
         invite = await self.db.get(InviteLink, invite_id)

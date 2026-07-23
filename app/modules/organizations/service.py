@@ -24,6 +24,10 @@ class OrganizationService:
         result = await self.db.execute(stmt.order_by(Organization.name))
         return list(result.scalars().all())
 
+    async def list_all_organizations(self) -> list[Organization]:
+        result = await self.db.execute(select(Organization).order_by(Organization.name))
+        return list(result.scalars().all())
+
     async def get_organization(self, organization_id: UUID) -> Organization:
         org = await self.db.get(Organization, organization_id)
         if org is None:

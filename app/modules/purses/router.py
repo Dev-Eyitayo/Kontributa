@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, Union
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
@@ -15,12 +15,27 @@ from app.core.auth import (
 from app.core.db import get_db
 from app.core.exceptions import ForbiddenError
 from app.core.idempotency import IdempotencyStore, fingerprint, get_idempotency_key, get_idempotency_store
-from app.core.response import success_response
+from app.core.response import StandardResponse, success_response
 from app.modules.contributions.service import ContributionService
 from app.modules.group_admins.service import GroupAdminService
 from app.modules.members.service import MemberService
 from app.modules.payouts.service import PayoutService
-from app.modules.purses.schemas import AddMemberToPurseRequest, CreatePurseRequest, UpdatePurseRequest
+from app.modules.purses.schemas import (
+    AddMemberToPurseRequest,
+    AddMemberToPurseResponse,
+    AvailableBalanceOut,
+    ContributionListItem,
+    CreatePurseRequest,
+    PurseDetailAdminOut,
+    PurseDetailMemberOut,
+    PurseListItemAdminOut,
+    PurseListItemMemberOut,
+    PurseOut,
+    PurseStatusResponse,
+    PurseSummary,
+    PurseUpdateResponse,
+    UpdatePurseRequest,
+)
 from app.modules.purses.service import PurseService
 
 router = APIRouter(prefix="/purses", tags=["purses"])
@@ -54,7 +69,7 @@ def _purse_out(purse) -> dict:
     }
 
 
-@router.post("", status_code=201)
+@router.post("", status_code=201, response_model=StandardResponse[PurseOut])
 async def create_purse(
     payload: CreatePurseRequest,
     idempotency_key: Optional[str] = Depends(get_idempotency_key),
@@ -94,7 +109,7 @@ async def create_purse(
     return JSONResponse(status_code=201, content=envelope_body)
 
 
-@router.get("")
+@router.get("", response_model=StandardResponse[list[Union[PurseListItemAdminOut, PurseListItemMemberOut]]])
 async def list_purses(
     status: Optional[str] = Query(default=None),
     current_user: CurrentUser = Depends(get_current_user),
@@ -123,7 +138,7 @@ async def list_purses(
     )
 
 
-@router.get("/{purse_id}")
+@router.get("/{purse_id}", response_model=StandardResponse[Union[PurseDetailAdminOut, PurseDetailMemberOut]])
 async def get_purse(
     purse_id: UUID,
     current_user: CurrentUser = Depends(get_current_user),
@@ -159,7 +174,7 @@ async def get_purse(
     )
 
 
-@router.patch("/{purse_id}")
+@router.patch("/{purse_id}", response_model=StandardResponse[PurseUpdateResponse])
 async def update_purse(
     purse_id: UUID,
     payload: UpdatePurseRequest,
@@ -172,7 +187,7 @@ async def update_purse(
     return success_response({"id": str(purse.id), "amount": str(purse.amount), "deadline": purse.deadline.isoformat()})
 
 
-@router.post("/{purse_id}/close")
+@router.post("/{purse_id}/close", response_model=StandardResponse[PurseStatusResponse])
 async def close_purse(
     purse_id: UUID,
     current_user: CurrentUser = Depends(get_current_group_admin_user),
@@ -184,7 +199,7 @@ async def close_purse(
     return success_response({"id": str(purse.id), "status": purse.status.value})
 
 
-@router.get("/{purse_id}/contributions")
+@router.get("/{purse_id}/contributions", response_model=StandardResponse[list[ContributionListItem]])
 async def list_contributions(
     purse_id: UUID,
     status: Optional[str] = Query(default=None),
@@ -214,7 +229,7 @@ async def list_contributions(
     )
 
 
-@router.post("/{purse_id}/contributions", status_code=201)
+@router.post("/{purse_id}/contributions", status_code=201, response_model=StandardResponse[AddMemberToPurseResponse])
 async def add_member_to_purse(
     purse_id: UUID,
     payload: AddMemberToPurseRequest,
@@ -236,7 +251,7 @@ async def add_member_to_purse(
     )
 
 
-@router.get("/{purse_id}/summary")
+@router.get("/{purse_id}/summary", response_model=StandardResponse[PurseSummary])
 async def get_summary(
     purse_id: UUID,
     current_user: CurrentUser = Depends(get_current_group_admin_user),
@@ -253,7 +268,7 @@ async def get_summary(
     return success_response({**summary, "total_collected": str(summary["total_collected"])})
 
 
-@router.get("/{purse_id}/available-balance")
+@router.get("/{purse_id}/available-balance", response_model=StandardResponse[AvailableBalanceOut])
 async def get_available_balance(
     purse_id: UUID,
     current_user: CurrentUser = Depends(get_current_group_admin_user),

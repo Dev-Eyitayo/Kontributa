@@ -41,3 +41,7 @@ class MemberListItem(BaseModel):
     cohort: Optional[str] = None
     invite_source: Optional[UUID] = None
     joined_at: datetime
+
+
+class RevokedResponse(BaseModel):
+    revoked: bool = True

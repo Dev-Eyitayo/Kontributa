@@ -7,9 +7,10 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.core.config import settings
 from app.core.db import get_db
 from app.core.exceptions import AuthError
-from app.core.response import success_response
+from app.core.response import StandardResponse, success_response
 from app.modules.notifications.service import SendByteClient, get_sendbyte_client
 from app.modules.payments.service import MonnifyClient
+from app.modules.webhooks.schemas import ReceivedResponse
 from app.modules.webhooks.service import (
     WebhookService,
     process_collection_webhook_event,
@@ -19,7 +20,7 @@ from app.modules.webhooks.service import (
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 
 
-@router.post("/monnify", status_code=202)
+@router.post("/monnify", status_code=202, response_model=StandardResponse[ReceivedResponse])
 async def monnify_webhook(
     request: Request,
     background_tasks: BackgroundTasks,
@@ -46,7 +47,7 @@ async def monnify_webhook(
     return success_response({"received": True}, status_code=202)
 
 
-@router.post("/monnify/transfers", status_code=202)
+@router.post("/monnify/transfers", status_code=202, response_model=StandardResponse[ReceivedResponse])
 async def monnify_transfer_webhook(
     request: Request,
     background_tasks: BackgroundTasks,

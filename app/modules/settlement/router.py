@@ -7,10 +7,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.auth import CurrentUser, get_current_group_admin_user
 from app.core.db import get_db
 from app.core.exceptions import ForbiddenError, NotFoundError
-from app.core.response import success_response
+from app.core.response import StandardResponse, success_response
 from app.modules.group_admins.service import GroupAdminService
 from app.modules.payments.service import MonnifyClient, get_monnify_client
-from app.modules.settlement.schemas import SettlementLookupRequest, SettlementSaveRequest
+from app.modules.settlement.schemas import (
+    SettlementAccountResponse,
+    SettlementLookupRequest,
+    SettlementLookupResponse,
+    SettlementSaveRequest,
+)
 from app.modules.settlement.service import SettlementService
 
 router = APIRouter(prefix="/groups", tags=["settlement"])
@@ -27,7 +32,7 @@ async def _assert_admin_of_group(db: AsyncSession, current_user: CurrentUser, gr
     return admin
 
 
-@router.post("/{group_id}/settlement-account/lookup")
+@router.post("/{group_id}/settlement-account/lookup", response_model=StandardResponse[SettlementLookupResponse])
 async def lookup_settlement_account(
     group_id: UUID,
     payload: SettlementLookupRequest,
@@ -41,7 +46,7 @@ async def lookup_settlement_account(
     return success_response(result)
 
 
-@router.post("/{group_id}/settlement-account")
+@router.post("/{group_id}/settlement-account", response_model=StandardResponse[SettlementAccountResponse])
 async def save_settlement_account(
     group_id: UUID,
     payload: SettlementSaveRequest,
@@ -66,7 +71,7 @@ async def save_settlement_account(
     )
 
 
-@router.get("/{group_id}/settlement-account")
+@router.get("/{group_id}/settlement-account", response_model=StandardResponse[SettlementAccountResponse])
 async def get_settlement_account(
     group_id: UUID,
     current_user: CurrentUser = Depends(get_current_group_admin_user),

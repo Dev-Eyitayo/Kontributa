@@ -16,16 +16,24 @@ from app.core.auth import (
 from app.core.config import settings
 from app.core.db import get_db
 from app.core.ratelimit import rate_limit_by_ip
-from app.core.response import success_response
+from app.core.response import StandardResponse, success_response
 from app.modules.auth.schemas import (
     ForgotPasswordRequest,
+    ForgotPasswordResponse,
     LoginRequest,
+    LoginResponse,
     LogoutRequest,
+    LogoutResponse,
     RefreshTokenRequest,
+    RefreshTokenResponse,
     RegisterRequest,
+    RegisterResponse,
     ResendVerificationRequest,
+    ResendVerificationResponse,
     ResetPasswordRequest,
+    ResetPasswordResponse,
     VerifyEmailRequest,
+    VerifyEmailResponse,
 )
 from app.modules.auth.service import AuthService
 from app.modules.notifications.service import NotificationService, SendByteClient, get_sendbyte_client
@@ -54,6 +62,7 @@ def get_auth_service(
 @router.post(
     "/register",
     status_code=201,
+    response_model=StandardResponse[RegisterResponse],
     dependencies=[Depends(rate_limit_by_ip("auth:register", settings.RATE_LIMIT_REGISTER_PER_HOUR, 3600))],
 )
 async def register(payload: RegisterRequest, service: AuthService = Depends(get_auth_service)) -> JSONResponse:
@@ -73,6 +82,7 @@ async def register(payload: RegisterRequest, service: AuthService = Depends(get_
 
 @router.post(
     "/verify-email",
+    response_model=StandardResponse[VerifyEmailResponse],
     dependencies=[
         Depends(rate_limit_by_ip("auth:verify-email", settings.RATE_LIMIT_VERIFY_EMAIL_PER_HOUR, 3600))
     ],
@@ -86,6 +96,7 @@ async def verify_email(
 
 @router.post(
     "/resend-verification",
+    response_model=StandardResponse[ResendVerificationResponse],
     dependencies=[
         Depends(rate_limit_by_ip("auth:resend-verification", settings.RATE_LIMIT_FORGOT_PASSWORD_PER_HOUR, 3600))
     ],
@@ -97,13 +108,13 @@ async def resend_verification(
     return success_response({"message": "verification email sent if account exists and is unverified"})
 
 
-@router.post("/login")
+@router.post("/login", response_model=StandardResponse[LoginResponse])
 async def login(payload: LoginRequest, service: AuthService = Depends(get_auth_service)) -> JSONResponse:
     access_token, refresh_token, role = await service.login(payload)
     return success_response({"access_token": access_token, "refresh_token": refresh_token, "role": role})
 
 
-@router.post("/refresh-token")
+@router.post("/refresh-token", response_model=StandardResponse[RefreshTokenResponse])
 async def refresh_token(
     payload: RefreshTokenRequest, service: AuthService = Depends(get_auth_service)
 ) -> JSONResponse:
@@ -111,7 +122,7 @@ async def refresh_token(
     return success_response({"access_token": access_token, "refresh_token": new_refresh_token})
 
 
-@router.post("/logout")
+@router.post("/logout", response_model=StandardResponse[LogoutResponse])
 async def logout(
     payload: LogoutRequest,
     current_user: CurrentUser = Depends(get_current_user),
@@ -123,6 +134,7 @@ async def logout(
 
 @router.post(
     "/forgot-password",
+    response_model=StandardResponse[ForgotPasswordResponse],
     dependencies=[
         Depends(rate_limit_by_ip("auth:forgot-password", settings.RATE_LIMIT_FORGOT_PASSWORD_PER_HOUR, 3600))
     ],
@@ -136,6 +148,7 @@ async def forgot_password(
 
 @router.post(
     "/reset-password",
+    response_model=StandardResponse[ResetPasswordResponse],
     dependencies=[
         Depends(rate_limit_by_ip("auth:reset-password", settings.RATE_LIMIT_RESET_PASSWORD_PER_HOUR, 3600))
     ],

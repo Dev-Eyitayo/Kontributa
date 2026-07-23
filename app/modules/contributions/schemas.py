@@ -11,8 +11,10 @@ class ContributionDetailResponse(BaseModel):
     purse_id: UUID
     member_id: UUID
     status: str
-    amount_expected: Decimal
-    amount_received: Decimal
+    # Money is always a string on the wire (never a bare JSON number, to
+    # avoid float precision loss) -- see known-limitations.md.
+    amount_expected: str
+    amount_received: str
     account_number: Optional[str] = None
     invoice_expires_at: Optional[datetime] = None
 
@@ -20,7 +22,7 @@ class ContributionDetailResponse(BaseModel):
 class GenerateInvoiceResponse(BaseModel):
     account_number: str
     bank_name: str
-    amount: Decimal
+    amount: str
     expires_at: datetime
 
 

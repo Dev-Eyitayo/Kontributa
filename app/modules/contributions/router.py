@@ -8,10 +8,18 @@ from app.core.auth import CurrentUser, get_current_user
 from app.core.db import get_db
 from app.core.exceptions import ForbiddenError
 from app.core.idempotency import IdempotencyStore, fingerprint, get_idempotency_key, get_idempotency_store
-from app.core.response import success_response
+from app.core.response import StandardResponse, success_response
 from app.modules.auth.models import User
 from app.modules.contributions.models import Contribution
-from app.modules.contributions.schemas import MarkManualRequest, ResolveFlagRequest
+from app.modules.contributions.schemas import (
+    ContributionDetailResponse,
+    ContributionHistoryItem,
+    GenerateInvoiceResponse,
+    MarkManualRequest,
+    MarkManualResponse,
+    ResolveFlagRequest,
+    ResolveFlagResponse,
+)
 from app.modules.contributions.service import ContributionService
 from app.modules.group_admins.service import GroupAdminService
 from app.modules.members.models import Member
@@ -57,7 +65,7 @@ async def _assert_admin_owns(db: AsyncSession, current_user: CurrentUser, contri
     return admin, purse
 
 
-@router.get("/{contribution_id}")
+@router.get("/{contribution_id}", response_model=StandardResponse[ContributionDetailResponse])
 async def get_contribution(
     contribution_id: UUID,
     current_user: CurrentUser = Depends(get_current_user),
@@ -74,7 +82,7 @@ async def get_contribution(
     return success_response(_contribution_out(contribution))
 
 
-@router.post("/{contribution_id}/generate-invoice")
+@router.post("/{contribution_id}/generate-invoice", response_model=StandardResponse[GenerateInvoiceResponse])
 async def generate_invoice(
     contribution_id: UUID,
     current_user: CurrentUser = Depends(get_current_user),
@@ -107,7 +115,7 @@ async def generate_invoice(
     )
 
 
-@router.post("/{contribution_id}/mark-manual")
+@router.post("/{contribution_id}/mark-manual", response_model=StandardResponse[MarkManualResponse])
 async def mark_manual(
     contribution_id: UUID,
     payload: MarkManualRequest,
@@ -146,7 +154,7 @@ async def mark_manual(
     return JSONResponse(status_code=200, content=envelope_body)
 
 
-@router.get("/{contribution_id}/history")
+@router.get("/{contribution_id}/history", response_model=StandardResponse[list[ContributionHistoryItem]])
 async def get_history(
     contribution_id: UUID,
     current_user: CurrentUser = Depends(get_current_user),
@@ -176,7 +184,7 @@ async def get_history(
     )
 
 
-@router.post("/{contribution_id}/resolve-flag")
+@router.post("/{contribution_id}/resolve-flag", response_model=StandardResponse[ResolveFlagResponse])
 async def resolve_flag(
     contribution_id: UUID,
     payload: ResolveFlagRequest,

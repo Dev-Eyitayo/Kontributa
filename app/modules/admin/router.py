@@ -6,8 +6,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import CurrentUser, get_current_admin_user
 from app.core.db import get_db
-from app.core.response import success_response
-from app.modules.admin.schemas import ReconciliationRunRequest
+from app.core.response import StandardResponse, success_response
+from app.modules.admin.schemas import (
+    FlaggedContributionItem,
+    ReconciliationRunRequest,
+    ReconciliationRunResponse,
+    WebhookEventListItem,
+)
 from app.modules.admin.service import AdminService
 from app.modules.jobs.service import run_reconciliation
 from app.modules.notifications.service import NotificationService, SendByteClient, get_sendbyte_client
@@ -20,7 +25,7 @@ def get_admin_service(db: AsyncSession = Depends(get_db)) -> AdminService:
     return AdminService(db)
 
 
-@router.post("/reconciliation/run")
+@router.post("/reconciliation/run", response_model=StandardResponse[ReconciliationRunResponse])
 async def trigger_reconciliation(
     payload: Optional[ReconciliationRunRequest] = None,
     _: CurrentUser = Depends(get_current_admin_user),
@@ -34,7 +39,7 @@ async def trigger_reconciliation(
     return success_response({"checked": checked, "updated": updated})
 
 
-@router.get("/webhook-events")
+@router.get("/webhook-events", response_model=StandardResponse[list[WebhookEventListItem]])
 async def list_webhook_events(
     processed: Optional[bool] = Query(default=None),
     _: CurrentUser = Depends(get_current_admin_user),
@@ -55,7 +60,7 @@ async def list_webhook_events(
     )
 
 
-@router.get("/contributions/flagged")
+@router.get("/contributions/flagged", response_model=StandardResponse[list[FlaggedContributionItem]])
 async def list_flagged_contributions(
     _: CurrentUser = Depends(get_current_admin_user),
     service: AdminService = Depends(get_admin_service),

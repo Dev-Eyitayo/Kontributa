@@ -8,13 +8,21 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.core.auth import CurrentUser, get_current_admin_user, get_current_group_admin_user, get_current_user
 from app.core.db import get_db
 from app.core.exceptions import ForbiddenError
-from app.core.response import success_response
+from app.core.response import StandardResponse, success_response
 from app.modules.auth.models import User
 from app.modules.group_admins.service import GroupAdminService
 from app.modules.notifications.service import SendByteClient, get_sendbyte_client
 from app.modules.payments.service import MonnifyClient, get_monnify_client
 from app.modules.payouts.models import Payout
-from app.modules.payouts.schemas import CreatePayoutRequest, RejectPayoutRequest
+from app.modules.payouts.schemas import (
+    CreatePayoutRequest,
+    PayoutApproveResponse,
+    PayoutCreateResponse,
+    PayoutDetailResponse,
+    PayoutListItem,
+    PayoutRejectResponse,
+    RejectPayoutRequest,
+)
 from app.modules.payouts.service import PayoutService, initiate_transfer_for_payout
 
 router = APIRouter(prefix="/payouts", tags=["payouts"])
@@ -40,7 +48,7 @@ def _payout_out(p: Payout) -> dict:
     }
 
 
-@router.post("", status_code=201)
+@router.post("", status_code=201, response_model=StandardResponse[PayoutCreateResponse])
 async def create_payout(
     payload: CreatePayoutRequest,
     current_user: CurrentUser = Depends(get_current_group_admin_user),
@@ -54,7 +62,7 @@ async def create_payout(
     )
 
 
-@router.get("")
+@router.get("", response_model=StandardResponse[list[PayoutListItem]])
 async def list_payouts(
     status: Optional[str] = Query(default=None),
     current_user: CurrentUser = Depends(get_current_user),
@@ -79,7 +87,7 @@ async def list_payouts(
     return success_response([_payout_out(p) for p in payouts])
 
 
-@router.get("/{payout_id}")
+@router.get("/{payout_id}", response_model=StandardResponse[PayoutDetailResponse])
 async def get_payout(
     payout_id: UUID,
     current_user: CurrentUser = Depends(get_current_user),
@@ -109,7 +117,7 @@ async def get_payout(
     )
 
 
-@router.post("/{payout_id}/approve")
+@router.post("/{payout_id}/approve", response_model=StandardResponse[PayoutApproveResponse])
 async def approve_payout(
     payout_id: UUID,
     background_tasks: BackgroundTasks,
@@ -130,7 +138,7 @@ async def approve_payout(
     )
 
 
-@router.post("/{payout_id}/reject")
+@router.post("/{payout_id}/reject", response_model=StandardResponse[PayoutRejectResponse])
 async def reject_payout(
     payout_id: UUID,
     payload: RejectPayoutRequest,

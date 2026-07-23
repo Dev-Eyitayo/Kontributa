@@ -9,8 +9,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.auth import CurrentUser, get_current_admin_user, get_current_user
 from app.core.db import get_db
 from app.core.exceptions import ForbiddenError
-from app.core.response import success_response
+from app.core.response import StandardResponse, success_response
 from app.modules.audit.models import AuditLog
+from app.modules.audit.schemas import (
+    ContributionAuditEntry,
+    GroupAuditFeedEntry,
+    PayoutAuditEntry,
+    PurseAuditEntry,
+)
 from app.modules.audit.service import AuditService
 from app.modules.auth.models import User
 from app.modules.group_admins.service import GroupAdminService
@@ -61,7 +67,7 @@ def _payout_history_out(entry: AuditLog) -> dict:
     }
 
 
-@router.get("/contributions/{contribution_id}")
+@router.get("/contributions/{contribution_id}", response_model=StandardResponse[list[ContributionAuditEntry]])
 async def get_contribution_audit(
     contribution_id: UUID,
     current_user: CurrentUser = Depends(get_current_user),
@@ -78,7 +84,7 @@ async def get_contribution_audit(
     return success_response([_contribution_history_out(e) for e in entries])
 
 
-@router.get("/purses/{purse_id}")
+@router.get("/purses/{purse_id}", response_model=StandardResponse[list[PurseAuditEntry]])
 async def get_purse_audit(
     purse_id: UUID,
     current_user: CurrentUser = Depends(get_current_user),
@@ -93,7 +99,7 @@ async def get_purse_audit(
     return success_response([_entry_out(e) for e in entries])
 
 
-@router.get("/payouts/{payout_id}")
+@router.get("/payouts/{payout_id}", response_model=StandardResponse[list[PayoutAuditEntry]])
 async def get_payout_audit(
     payout_id: UUID,
     current_user: CurrentUser = Depends(get_current_user),
@@ -116,7 +122,7 @@ async def get_payout_audit(
     return success_response([_payout_history_out(e) for e in entries])
 
 
-@router.get("/groups/{group_id}")
+@router.get("/groups/{group_id}", response_model=StandardResponse[list[GroupAuditFeedEntry]])
 async def get_group_audit_feed(
     group_id: UUID,
     from_: Optional[datetime] = Query(default=None, alias="from"),

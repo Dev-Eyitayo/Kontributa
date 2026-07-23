@@ -13,15 +13,16 @@ from app.core.db import get_db
 from app.core.exceptions import BusinessRuleError, ForbiddenError, NotFoundError
 from app.core.ratelimit import check_rate_limit
 from app.core.redis import get_redis
-from app.core.response import success_response
+from app.core.response import StandardResponse, success_response
 from app.modules.group_admins.service import GroupAdminService
+from app.modules.notifications.schemas import RemindPurseResponse
 from app.modules.notifications.service import SendByteClient, get_sendbyte_client, send_purse_reminders
 from app.modules.purses.models import Purse
 
 router = APIRouter(prefix="/purses", tags=["notifications"])
 
 
-@router.post("/{purse_id}/remind")
+@router.post("/{purse_id}/remind", response_model=StandardResponse[RemindPurseResponse])
 async def remind_purse(
     purse_id: UUID,
     background_tasks: BackgroundTasks,

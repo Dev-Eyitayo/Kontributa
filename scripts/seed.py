@@ -25,7 +25,7 @@ from app.core.security import hash_password
 from app.modules.auth.models import User
 from app.modules.organizations.models import Group, Organization, OrganizationType
 
-ADMIN_EMAIL = "admin@kontributa.local"
+ADMIN_EMAIL = "admin@kontributa.app"
 ADMIN_PASSWORD = "AdminPass123!"
 
 ORG_NAME = "Lead City University"

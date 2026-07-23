@@ -7,11 +7,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import CurrentUser, get_current_admin_user
 from app.core.db import get_db
-from app.core.response import success_response
+from app.core.response import StandardResponse, success_response
 from app.modules.organizations.schemas import (
     AdminCreateGroupRequest,
     AdminCreateOrganizationRequest,
+    AdminGroupResponse,
+    AdminOrganizationResponse,
     AdminUpdateOrganizationRequest,
+    GroupOut,
+    OrganizationOut,
 )
 from app.modules.organizations.service import OrganizationService
 
@@ -23,7 +27,7 @@ def get_organization_service(db: AsyncSession = Depends(get_db)) -> Organization
     return OrganizationService(db)
 
 
-@public_router.get("/organizations")
+@public_router.get("/organizations", response_model=StandardResponse[list[OrganizationOut]])
 async def list_organizations(
     q: Optional[str] = Query(default=None),
     service: OrganizationService = Depends(get_organization_service),
@@ -34,7 +38,7 @@ async def list_organizations(
     )
 
 
-@public_router.get("/organizations/{organization_id}/groups")
+@public_router.get("/organizations/{organization_id}/groups", response_model=StandardResponse[list[GroupOut]])
 async def list_groups(
     organization_id: UUID,
     service: OrganizationService = Depends(get_organization_service),
@@ -45,7 +49,7 @@ async def list_groups(
     )
 
 
-@admin_router.post("/organizations", status_code=201)
+@admin_router.post("/organizations", status_code=201, response_model=StandardResponse[AdminOrganizationResponse])
 async def create_organization(
     payload: AdminCreateOrganizationRequest,
     _: CurrentUser = Depends(get_current_admin_user),
@@ -65,7 +69,7 @@ async def create_organization(
     )
 
 
-@admin_router.patch("/organizations/{organization_id}")
+@admin_router.patch("/organizations/{organization_id}", response_model=StandardResponse[AdminOrganizationResponse])
 async def update_organization(
     organization_id: UUID,
     payload: AdminUpdateOrganizationRequest,
@@ -85,7 +89,7 @@ async def update_organization(
     )
 
 
-@admin_router.post("/groups", status_code=201)
+@admin_router.post("/groups", status_code=201, response_model=StandardResponse[AdminGroupResponse])
 async def create_group(
     payload: AdminCreateGroupRequest,
     _: CurrentUser = Depends(get_current_admin_user),

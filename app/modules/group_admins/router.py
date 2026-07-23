@@ -7,10 +7,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import CurrentUser, get_current_group_admin_user
 from app.core.db import get_db
-from app.core.response import success_response
-from app.modules.group_admins.schemas import OnboardGroupAdminRequest
+from app.core.response import StandardResponse, success_response
+from app.modules.group_admins.schemas import (
+    GroupAdminMeResponse,
+    MemberListItem,
+    OnboardGroupAdminRequest,
+    OnboardGroupAdminResponse,
+    RevokedResponse,
+)
 from app.modules.group_admins.service import GroupAdminService
-from app.modules.invites.schemas import InviteLinkCreateRequest
+from app.modules.invites.schemas import InviteLinkCreateRequest, InviteLinkCreateResponse, InviteLinkListItem
 from app.modules.invites.service import InviteService
 
 router = APIRouter(prefix="/group-admins", tags=["group-admins"])
@@ -20,7 +26,7 @@ def get_group_admin_service(db: AsyncSession = Depends(get_db)) -> GroupAdminSer
     return GroupAdminService(db)
 
 
-@router.post("/onboard", status_code=201)
+@router.post("/onboard", status_code=201, response_model=StandardResponse[OnboardGroupAdminResponse])
 async def onboard(
     payload: OnboardGroupAdminRequest,
     current_user: CurrentUser = Depends(get_current_group_admin_user),
@@ -38,7 +44,7 @@ async def onboard(
     )
 
 
-@router.get("/me")
+@router.get("/me", response_model=StandardResponse[GroupAdminMeResponse])
 async def get_me(
     current_user: CurrentUser = Depends(get_current_group_admin_user),
     service: GroupAdminService = Depends(get_group_admin_service),
@@ -57,7 +63,7 @@ async def get_me(
     )
 
 
-@router.post("/invite-links", status_code=201)
+@router.post("/invite-links", status_code=201, response_model=StandardResponse[InviteLinkCreateResponse])
 async def create_invite_link(
     payload: InviteLinkCreateRequest,
     current_user: CurrentUser = Depends(get_current_group_admin_user),
@@ -75,7 +81,7 @@ async def create_invite_link(
     )
 
 
-@router.get("/invite-links")
+@router.get("/invite-links", response_model=StandardResponse[list[InviteLinkListItem]])
 async def list_invite_links(
     current_user: CurrentUser = Depends(get_current_group_admin_user),
     service: GroupAdminService = Depends(get_group_admin_service),
@@ -96,7 +102,7 @@ async def list_invite_links(
     )
 
 
-@router.delete("/invite-links/{invite_id}")
+@router.delete("/invite-links/{invite_id}", response_model=StandardResponse[RevokedResponse])
 async def revoke_invite_link(
     invite_id: UUID,
     current_user: CurrentUser = Depends(get_current_group_admin_user),
@@ -106,7 +112,7 @@ async def revoke_invite_link(
     return success_response({"revoked": True})
 
 
-@router.get("/members")
+@router.get("/members", response_model=StandardResponse[list[MemberListItem]])
 async def list_members(
     cohort: Optional[str] = Query(default=None),
     current_user: CurrentUser = Depends(get_current_group_admin_user),

@@ -44,7 +44,7 @@ def _prepare_schema_once() -> None:
         # creation + GRANT/REVOKE setup (see 83d4db43c592) has to be
         # mirrored here too -- otherwise the REVOKE-permissions test would
         # be exercising a role that was never actually restricted.
-        engine = create_async_engine(settings.DATABASE_URL, poolclass=pool.NullPool)
+        engine = create_async_engine(settings.TEST_DATABASE_URL, poolclass=pool.NullPool)
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.drop_all)
             await conn.run_sync(Base.metadata.create_all)
@@ -175,9 +175,9 @@ async def db_setup():
     # the schema-bootstrap-time superuser connection. Teardown's wipe-all
     # step needs the superuser instead, since it deletes from those same
     # audit tables between tests, which the restricted role can't do.
-    engine = create_async_engine(settings.RUNTIME_DATABASE_URL, poolclass=pool.NullPool)
+    engine = create_async_engine(settings.TEST_RUNTIME_DATABASE_URL, poolclass=pool.NullPool)
     session_local = async_sessionmaker(bind=engine, expire_on_commit=False, autoflush=False)
-    admin_engine = create_async_engine(settings.DATABASE_URL, poolclass=pool.NullPool)
+    admin_engine = create_async_engine(settings.TEST_DATABASE_URL, poolclass=pool.NullPool)
     fake_redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
 
     fake_monnify = FakeMonnifyClient()

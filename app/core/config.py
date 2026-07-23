@@ -21,6 +21,17 @@ class Settings(BaseSettings):
     APP_DB_ROLE: str = "kontributa_app"
     APP_DB_PASSWORD: str = "kontributa_app_password"
 
+    # A DIFFERENT database from the two above, on purpose. tests/conftest.py
+    # runs Base.metadata.drop_all + create_all at the start of every pytest
+    # session -- pointed at DATABASE_URL/RUNTIME_DATABASE_URL, that would
+    # wipe real dev data on every test run (this happened for real: it's why
+    # this setting exists). Never repoint these at the same database name as
+    # DATABASE_URL/RUNTIME_DATABASE_URL.
+    TEST_DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/kontributa_test"
+    TEST_RUNTIME_DATABASE_URL: str = (
+        "postgresql+asyncpg://kontributa_app:kontributa_app_password@localhost:5432/kontributa_test"
+    )
+
     REDIS_URL: str = "redis://localhost:6379/0"
 
     JWT_SECRET_KEY: str = "change-me-in-production"

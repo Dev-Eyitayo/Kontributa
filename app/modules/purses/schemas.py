@@ -39,12 +39,22 @@ class AddMemberToPurseRequest(BaseModel):
     member_id: UUID
 
 
+class AddMemberToPurseResponse(BaseModel):
+    id: UUID
+    purse_id: UUID
+    member_id: UUID
+    status: str
+    amount_expected: str
+
+
 class ContributionListItem(BaseModel):
     member_id: UUID
     name: str
     member_id_number: Optional[str] = None
     status: str
-    amount_received: Decimal
+    # Money is always a string on the wire (never a bare JSON number, to
+    # avoid float precision loss) -- see known-limitations.md.
+    amount_received: str
     paid_at: Optional[datetime] = None
 
 
@@ -53,5 +63,53 @@ class PurseSummary(BaseModel):
     pending_count: int
     expired_count: int
     flagged_count: int
-    total_collected: Decimal
+    # Money is always a string on the wire (never a bare JSON number, to
+    # avoid float precision loss) -- see known-limitations.md.
+    total_collected: str
     percent_complete: float
+
+
+class PurseOut(BaseModel):
+    id: UUID
+    title: str
+    amount: str
+    deadline: str
+    status: str
+
+
+class PurseListItemAdminOut(PurseOut):
+    paid_count: int
+    total_count: int
+
+
+class PurseListItemMemberOut(PurseOut):
+    contribution_status: str
+
+
+class PurseDetailAdminOut(PurseOut):
+    enroll_mode: EnrollModeLiteral
+    paid_count: int
+    total_count: int
+
+
+class PurseDetailMemberOut(PurseOut):
+    enroll_mode: EnrollModeLiteral
+    contribution_status: str
+
+
+class PurseUpdateResponse(BaseModel):
+    id: UUID
+    amount: str
+    deadline: str
+
+
+class PurseStatusResponse(BaseModel):
+    id: UUID
+    status: str
+
+
+class AvailableBalanceOut(BaseModel):
+    purse_id: UUID
+    collected_total: str
+    paid_out_total: str
+    available_balance: str

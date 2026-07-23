@@ -9,9 +9,16 @@ from app.core.auth import (
     get_email_verification_token_store,
 )
 from app.core.db import get_db
-from app.core.response import success_response
+from app.core.response import StandardResponse, success_response
 from app.modules.contributions.service import ContributionService
-from app.modules.members.schemas import JoinRequest, MemberUpdateRequest
+from app.modules.members.schemas import (
+    JoinRequest,
+    JoinResponse,
+    MemberMeResponse,
+    MemberPurseListItem,
+    MemberUpdateRequest,
+    MemberUpdateResponse,
+)
 from app.modules.members.service import MemberService
 from app.modules.notifications.service import NotificationService, SendByteClient, get_sendbyte_client
 
@@ -30,7 +37,7 @@ def get_contribution_service(db: AsyncSession = Depends(get_db)) -> Contribution
     return ContributionService(db)
 
 
-@router.post("/join/{token}", status_code=201)
+@router.post("/join/{token}", status_code=201, response_model=StandardResponse[JoinResponse])
 async def join(
     token: str, payload: JoinRequest, service: MemberService = Depends(get_member_service)
 ) -> JSONResponse:
@@ -46,7 +53,7 @@ async def join(
     )
 
 
-@router.get("/me")
+@router.get("/me", response_model=StandardResponse[MemberMeResponse])
 async def get_me(
     current_user: CurrentUser = Depends(get_current_member_user),
     service: MemberService = Depends(get_member_service),
@@ -64,7 +71,7 @@ async def get_me(
     )
 
 
-@router.patch("/me")
+@router.patch("/me", response_model=StandardResponse[MemberUpdateResponse])
 async def update_me(
     payload: MemberUpdateRequest,
     current_user: CurrentUser = Depends(get_current_member_user),
@@ -81,7 +88,7 @@ async def update_me(
     )
 
 
-@router.get("/me/purses")
+@router.get("/me/purses", response_model=StandardResponse[list[MemberPurseListItem]])
 async def list_my_purses(
     current_user: CurrentUser = Depends(get_current_member_user),
     member_service: MemberService = Depends(get_member_service),

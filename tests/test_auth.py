@@ -106,7 +106,9 @@ async def test_resend_verification_issues_a_new_working_token(client):
     keys = await _state["redis"].keys("verify_email:*")
     second_token = next(k.split(":", 1)[1] for k in keys if k.split(":", 1)[1] != first_token)
 
-    verify = await client.post("/auth/verify-email", json={"token": second_token})
+    verify = await client.post(
+        "/auth/verify-email", json={"email": "lost-my-token@example.com", "token": second_token}
+    )
     assert verify.status_code == 200
     assert verify.json()["data"]["verified"] is True
 
@@ -120,7 +122,7 @@ async def test_resend_verification_unknown_email_still_returns_200(client):
 async def test_resend_verification_already_verified_is_a_silent_noop(client):
     await _register(client, email="already-verified@example.com")
     token = await find_redis_token("verify_email")
-    await client.post("/auth/verify-email", json={"token": token})
+    await client.post("/auth/verify-email", json={"email": "already-verified@example.com", "token": token})
 
     resp = await client.post("/auth/resend-verification", json={"email": "already-verified@example.com"})
     assert resp.status_code == 200

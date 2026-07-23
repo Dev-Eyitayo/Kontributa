@@ -45,3 +45,11 @@ class MemberUpdateResponse(BaseModel):
     first_name: str
     last_name: str
     member_id_number: Optional[str] = None
+
+
+class MemberPurseListItem(BaseModel):
+    purse_id: UUID
+    title: str
+    amount: str
+    deadline: str
+    contribution_status: str

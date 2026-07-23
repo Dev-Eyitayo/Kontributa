@@ -1,5 +1,4 @@
 from datetime import datetime
-from decimal import Decimal
 from typing import Optional
 from uuid import UUID
 
@@ -27,5 +26,7 @@ class FlaggedContributionItem(BaseModel):
     id: UUID
     purse_id: UUID
     member_id: UUID
-    amount_expected: Decimal
-    amount_received: Decimal
+    # Money is always a string on the wire (never a bare JSON number, to
+    # avoid float precision loss) -- see known-limitations.md.
+    amount_expected: str
+    amount_received: str

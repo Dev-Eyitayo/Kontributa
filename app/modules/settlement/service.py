@@ -19,10 +19,9 @@ from app.modules.settlement.models import SettlementAccount, SettlementMode
 
 logger = logging.getLogger("kontributa.settlement")
 
-# Direct mode routes 100% of the split to the group's own sub-account --
-# no platform fee was asked for in this prompt, so none is silently
-# invented here. Raising this above 0 (and wiring a real fee decision) is
-# a deliberate product choice for later, not a default to guess at now.
+# Direct mode routes 100% of the split to the group's own sub-account.
+# Raising this above 0 (and wiring a real fee decision) is a deliberate
+# product choice for later, not a default to guess at now.
 DIRECT_MODE_SPLIT_PERCENTAGE = Decimal("100")
 
 

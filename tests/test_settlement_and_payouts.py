@@ -47,6 +47,13 @@ async def _setup_purse_with_paid_contribution(client, db_session, collected="250
         f"/members/join/{token}",
         json={"email": f"member-{email}", "password": "password123", "first_name": "Member", "last_name": "One"},
     )
+    # Consumed immediately, not left dangling -- an unconsumed verify_email
+    # token here would sit in Redis and collide with the next unrelated
+    # find_redis_token("verify_email") call anywhere later in the same
+    # test (e.g. registering a second admin), since that lookup has no way
+    # to tell two coexisting tokens apart and can grab the wrong one.
+    member_verify_token = await find_redis_token("verify_email")
+    await client.post("/auth/verify-email", json={"email": f"member-{email}", "token": member_verify_token})
 
     create = await client.post(
         "/purses",
@@ -540,9 +547,6 @@ async def test_platform_admin_can_list_and_view_all_payouts(client, db_session):
     detail_resp = await client.get(f"/payouts/{payout_id}", headers=admin_headers)
     assert detail_resp.status_code == 200
     assert detail_resp.json()["data"]["id"] == payout_id
-
-
-# --- Part 2: dual settlement mode ------------------------------------------
 
 
 async def test_settlement_direct_save_creates_sub_account_and_sets_mode(client, db_session):

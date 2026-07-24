@@ -18,8 +18,8 @@ class NotificationStatus(str, enum.Enum):
 class NotificationLog(Base):
     """Operational record of every email send attempt, success or failure --
     for debugging delivery problems, not a money/trust audit trail (that's
-    Phase 6's AuditLog; this table is intentionally separate and does not
-    need the same append-only/hash-chain guarantees)."""
+    AuditLog; this table is intentionally separate and does not need the
+    same append-only/hash-chain guarantees)."""
 
     __tablename__ = "notification_logs"
 

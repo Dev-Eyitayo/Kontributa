@@ -270,10 +270,9 @@ async def test_rep_cannot_manage_another_reps_purse(client, db_session):
 
 
 async def test_platform_admin_can_list_contributions_for_any_purse(client, db_session):
-    # A platform admin has no GroupAdmin profile row -- D4 (Flagged
-    # Contributions) clicks through to this exact endpoint for
-    # human-readable context, so it must not 404/403 for them the way it
-    # correctly does for an unrelated group admin (see the test above).
+    # A platform admin has no GroupAdmin profile row, so this endpoint
+    # must not 404/403 for them the way it correctly does for an
+    # unrelated group admin (see the test above).
     org, group, headers = await _setup_group_with_admin(client, db_session)
     create = await client.post(
         "/purses",
@@ -304,8 +303,8 @@ async def test_same_group_admin_can_manage_purse_they_did_not_create(client, db_
     # headers_b now administers a *different* group than group -- to prove
     # "same group, co-admin" access, headers_b must be given a GroupAdmin
     # row on `group` itself (there is no API path for that -- co-admin
-    # invites are explicitly out of scope for this prompt -- see
-    # known-limitations.md), so this is set up directly in the DB instead.
+    # invites are out of scope -- see known-limitations.md), so this is
+    # set up directly in the DB instead.
     from app.modules.group_admins.models import GroupAdmin
     from app.modules.auth.models import User
     from sqlalchemy import select

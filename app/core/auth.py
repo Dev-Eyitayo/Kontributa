@@ -24,11 +24,6 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-# ---------------------------------------------------------------------------
-# Access tokens (stateless JWT, short-lived)
-# ---------------------------------------------------------------------------
-
-
 @dataclass
 class AccessToken:
     token: str
@@ -60,11 +55,6 @@ def decode_access_token(token: str) -> dict:
         raise AuthError("invalid access token", code="token_invalid")
 
 
-# ---------------------------------------------------------------------------
-# Access-token blacklist (logout support)
-# ---------------------------------------------------------------------------
-
-
 class AccessTokenBlacklist:
     def __init__(self, redis: Redis):
         self._redis = redis
@@ -83,11 +73,6 @@ class AccessTokenBlacklist:
 
 def get_access_token_blacklist(redis: Redis = Depends(get_redis)) -> AccessTokenBlacklist:
     return AccessTokenBlacklist(redis)
-
-
-# ---------------------------------------------------------------------------
-# Refresh tokens (Redis-backed, rotating, with reuse detection)
-# ---------------------------------------------------------------------------
 
 
 class RefreshTokenService:
@@ -164,11 +149,6 @@ def get_refresh_token_service(redis: Redis = Depends(get_redis)) -> RefreshToken
     return RefreshTokenService(redis)
 
 
-# ---------------------------------------------------------------------------
-# Single-use, short-TTL Redis tokens (email verification, password reset)
-# ---------------------------------------------------------------------------
-
-
 def _generate_numeric_code() -> str:
     return f"{secrets.randbelow(1_000_000):06d}"
 
@@ -231,11 +211,6 @@ def get_password_reset_token_store(redis: Redis = Depends(get_redis)) -> SingleU
     return SingleUseTokenStore(
         redis, "reset_password", timedelta(minutes=settings.PASSWORD_RESET_TOKEN_EXPIRE_MINUTES)
     )
-
-
-# ---------------------------------------------------------------------------
-# Request-scoped identity dependencies
-# ---------------------------------------------------------------------------
 
 
 class UserRole(str, Enum):

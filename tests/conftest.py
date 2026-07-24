@@ -42,10 +42,10 @@ from app.modules.webhooks import models as _webhook_models  # noqa: F401
 def _prepare_schema_once() -> None:
     async def _run():
         # Tests build the schema directly from Base.metadata rather than
-        # running Alembic migrations, so the Phase 6 migration's role
-        # creation + GRANT/REVOKE setup (see 83d4db43c592) has to be
-        # mirrored here too -- otherwise the REVOKE-permissions test would
-        # be exercising a role that was never actually restricted.
+        # running Alembic migrations, so the role creation + GRANT/REVOKE
+        # setup from migration 83d4db43c592 has to be mirrored here too --
+        # otherwise the REVOKE-permissions test would be exercising a role
+        # that was never actually restricted.
         engine = create_async_engine(settings.TEST_DATABASE_URL, poolclass=pool.NullPool)
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.drop_all)
@@ -339,17 +339,11 @@ async def onboard_group_admin(
     group_name: str = "Onboarded Group",
     cohort: str | None = None,
 ) -> Group:
-    """POST /group-admins/onboard now always creates a brand-new Group --
-    there is no more "pick an existing group_id" path (that was the bug
-    Part 1 removed). Tests that used to onboard straight into
-    create_org_and_group's own Group now call this instead, and get back
-    the *actual* Group the onboard call created (fetched fresh from the
-    DB by the id in the response) -- every existing assertion that reads
-    `group.id`/`group.name`/`group.short_code` keeps working unchanged,
-    it just refers to the real onboarded group instead of a throwaway one.
-    A duplicate group_name within the same org is fine -- the backend
-    auto-dedupes the short_code on collision.
-    """
+    """Always creates a brand-new Group via POST /group-admins/onboard --
+    there is no "pick an existing group_id" path -- so this fetches and
+    returns the actual Group the call created. A duplicate group_name
+    within the same org is fine: the backend auto-dedupes the short_code
+    on collision."""
     from uuid import UUID
 
     payload: dict = {"organization_id": str(org.id), "new_group_name": group_name}

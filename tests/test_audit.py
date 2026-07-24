@@ -250,11 +250,11 @@ async def test_verify_chain_detects_a_directly_inserted_tampered_row(client, db_
 
 
 async def test_app_role_cannot_update_or_delete_audit_log(client, db_session):
-    """Constraint from the phase 6 prompt: this must fail with a real
-    database permissions error using the application's own role/connection
-    -- not merely because the ORM layer refuses to expose an update/delete
-    method. db_session runs as the same restricted RUNTIME_DATABASE_URL
-    role the app itself queries as (see conftest.py's db_setup fixture)."""
+    """Must fail with a real database permissions error using the
+    application's own role/connection -- not merely because the ORM layer
+    refuses to expose an update/delete method. db_session runs as the same
+    restricted RUNTIME_DATABASE_URL role the app itself queries as (see
+    conftest.py's db_setup fixture)."""
     org, group, headers, member_headers, purse_id, contribution_id = await _setup_purse_with_paid_contribution(
         client, db_session
     )

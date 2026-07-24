@@ -60,17 +60,21 @@ class ContributionService:
             Purse.status == PurseStatus.OPEN,
         )
         purses = (await self.db.execute(stmt)).scalars().all()
+        eligible = [p for p in purses if p.cohort is None or p.cohort == member.cohort]
 
-        created = False
-        for purse in purses:
-            if purse.cohort is not None and purse.cohort != member.cohort:
-                continue
-            existing = await self.db.execute(
-                select(Contribution).where(
-                    Contribution.purse_id == purse.id, Contribution.member_id == member.id
+        existing_purse_ids: set[UUID] = set()
+        if eligible:
+            existing_rows = await self.db.execute(
+                select(Contribution.purse_id).where(
+                    Contribution.member_id == member.id,
+                    Contribution.purse_id.in_([p.id for p in eligible]),
                 )
             )
-            if existing.scalar_one_or_none() is not None:
+            existing_purse_ids = set(existing_rows.scalars().all())
+
+        created = False
+        for purse in eligible:
+            if purse.id in existing_purse_ids:
                 continue
             self.db.add(Contribution(purse_id=purse.id, member_id=member.id, amount_expected=purse.amount))
             created = True
@@ -256,8 +260,7 @@ class ContributionService:
         )
         # Also written to the universal AuditLog, in addition to the
         # domain-specific ContributionEvent row above -- both tables are
-        # append-only and neither replaces the other (see name-mapping /
-        # Phase 6 scope: AuditLog generalizes but does not remove these).
+        # append-only and neither replaces the other.
         await self.audit.record_event(
             entity_type="contribution",
             entity_id=contribution.id,
@@ -287,10 +290,7 @@ class ContributionService:
         self, contribution: Contribution, notifications: Optional[NotificationService] = None
     ) -> Contribution:
         """Lazily applies the pending -> expired transition once the stored
-        invoice's validity window has lapsed. Phase 4's scheduled
-        reconciliation job calls this same helper on a timer; here it runs
-        on-demand (e.g. right before generate-invoice decides whether to
-        reuse or replace the current invoice).
+        invoice's validity window has lapsed.
 
         `notifications` is optional and skipped entirely when None -- only
         callers that explicitly wire a NotificationService trigger the
@@ -499,8 +499,6 @@ class ContributionService:
             contribution.status = ContributionStatus.PENDING
             note = "rep requested a top-up for the shortfall"
         elif resolution == "refund":
-            # Refunding overpaid funds requires a Monnify disbursement call,
-            # which isn't wired up until Phase 5 (Settlement & Payouts).
             raise BusinessRuleError(
                 "refund disbursement is not available until Phase 5's Monnify transfer integration",
                 code="refund_not_yet_supported",

@@ -48,6 +48,7 @@ class Contribution(Base):
         Enum(ContributionStatus, name="contribution_status", values_callable=lambda e: [m.value for m in e]),
         nullable=False,
         default=ContributionStatus.PENDING,
+        index=True,
     )
     paid_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 

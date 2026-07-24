@@ -164,7 +164,7 @@ async def process_collection_webhook_event(
             return
 
         # Single shared decision point for pending -> paid/flagged_for_review --
-        # the reconciliation job (Phase 4) calls this exact same method.
+        # the reconciliation job calls this exact same method.
         notifications = NotificationService(db, sendbyte)
         contribution = await ContributionService(db).apply_payment_confirmation(
             contribution, data.amount_paid, data.paid_on, ActorType.WEBHOOK, "Monnify webhook", notifications

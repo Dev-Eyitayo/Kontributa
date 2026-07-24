@@ -286,9 +286,6 @@ async def test_join_additional_group_same_group_twice_still_409s(client, db_sess
     (
         await db_session.execute(select(User).where(User.email == "rep2@example.com"))
     ).scalar_one()
-    # This second admin needs a GroupAdmin row on the *same* group as the
-    # first -- there's no invite-a-co-admin API (out of scope for this
-    # prompt), so it's added directly.
     user_2 = (await db_session.execute(select(User).where(User.email == "rep2@example.com"))).scalar_one()
     db_session.add(GroupAdmin(user_id=user_2.id, group_id=group.id))
     await db_session.commit()

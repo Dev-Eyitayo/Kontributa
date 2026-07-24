@@ -89,7 +89,7 @@ class NotificationService:
     notification problem can never block or roll back the business state
     change that triggered it. Every attempt, success or failure, gets a
     NotificationLog row -- an operational record for debugging delivery,
-    not a Phase 6 AuditLog entry."""
+    not an AuditLog entry."""
 
     def __init__(self, db: AsyncSession, client: SendByteClient):
         self.db = db

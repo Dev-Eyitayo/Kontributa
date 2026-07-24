@@ -23,7 +23,7 @@ class AuditLog(Base):
     platform-wide. record_event() in service.py is the only code path
     permitted to write here -- there is no update()/delete() on this model,
     and the database role the application runs as has UPDATE/DELETE
-    revoked on this table at the schema level (see the Phase 6 migration)."""
+    revoked on this table at the schema level."""
 
     __tablename__ = "audit_log"
 

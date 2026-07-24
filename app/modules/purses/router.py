@@ -271,9 +271,7 @@ async def list_contributions(
     # is_platform_admin flag on User that actually distinguishes them) --
     # and a platform admin has no GroupAdmin profile row, so check that
     # flag first rather than assuming a "group_admin"-role token always
-    # has one. Mirrors audit/router.py::get_payout_audit's pattern -- this
-    # is also what lets D4 (Flagged Contributions) click through to a
-    # purse's transparency view as the platform admin viewing it.
+    # has one. Mirrors audit/router.py::get_payout_audit's pattern.
     user_row = await db.get(User, current_user.id)
     purse = await purse_service.get_by_id(purse_id)
     if user_row is not None and user_row.is_platform_admin:

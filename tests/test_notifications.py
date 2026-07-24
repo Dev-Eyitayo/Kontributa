@@ -222,9 +222,6 @@ async def _register_settlement_account(client, group_id, headers, account_number
     return resp.json()["data"]
 
 
-# --- Auth emails ---------------------------------------------------------
-
-
 async def test_register_sends_verification_email(client):
     resp = await client.post(
         "/auth/register",
@@ -283,9 +280,6 @@ async def test_register_rate_limited_after_burst(client):
         )
     assert responses[-1].status_code == 429
     assert responses[-1].json()["error"]["code"] == "rate_limited"
-
-
-# --- Contribution emails --------------------------------------------------
 
 
 async def test_receipt_email_sent_on_webhook_paid(client, db_session):
@@ -368,9 +362,6 @@ async def test_notification_log_records_each_send(client, db_session):
     assert log.template_name == "verify_email.html"
 
 
-# --- Payout emails ---------------------------------------------------------
-
-
 async def test_payout_completed_email_sent_to_rep(client, db_session):
     org, group, headers, purse_id = await _setup_purse_with_paid_contribution(client, db_session, collected="2500.00")
     await _register_settlement_account(client, group.id, headers)
@@ -418,9 +409,6 @@ async def test_payout_failed_email_sent_to_rep(client, db_session):
     matching = [e for e in _state["sendbyte"].sent if e["to_email"] == "rep@example.com"]
     assert len(matching) == 1
     assert "Payout failed" in matching[0]["subject"]
-
-
-# --- Purse reminders --------------------------------------------------------
 
 
 async def test_remind_sends_only_to_pending_members(client, db_session):

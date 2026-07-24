@@ -204,7 +204,6 @@ async def test_refresh_token_rotation_and_reuse_detection(client):
     )
     refresh_token_1 = login.json()["data"]["refresh_token"]
 
-    # First rotation succeeds and issues a new token.
     r1 = await client.post("/auth/refresh-token", json={"refresh_token": refresh_token_1})
     assert r1.status_code == 200
     refresh_token_2 = r1.json()["data"]["refresh_token"]

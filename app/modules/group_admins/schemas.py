@@ -8,8 +8,8 @@ from pydantic import BaseModel
 class OnboardGroupAdminRequest(BaseModel):
     # Always creates a brand-new Group -- there is deliberately no way to
     # pass an existing group_id here. Letting a new admin pick and take
-    # control of an existing group (the previous shape of this request) is
-    # exactly the bug this replaces; see known-limitations.md.
+    # control of an existing group would be a privilege-escalation bug;
+    # see known-limitations.md.
     organization_id: UUID
     new_group_name: str
     new_group_short_code: Optional[str] = None

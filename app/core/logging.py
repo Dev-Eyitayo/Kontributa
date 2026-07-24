@@ -7,8 +7,8 @@ from app.core.config import settings
 
 LOG_DIR = "logs"
 LOG_FILE = os.path.join(LOG_DIR, "kontributa.log")
-LOG_FILE_MAX_BYTES = 5 * 1024 * 1024  # rotate at 5 MB
-LOG_FILE_BACKUP_COUNT = 5  # keep 5 rotated files alongside the active one (~30 MB total)
+LOG_FILE_MAX_BYTES = 5 * 1024 * 1024
+LOG_FILE_BACKUP_COUNT = 5
 
 
 def configure_logging() -> None:

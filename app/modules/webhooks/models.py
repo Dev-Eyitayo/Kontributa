@@ -16,7 +16,7 @@ class WebhookEvent(Base):
     provider_event_id: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
     raw_payload: Mapped[str] = mapped_column(Text, nullable=False)
     signature_valid: Mapped[bool] = mapped_column(Boolean, nullable=False)
-    processed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    processed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True)
     processing_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

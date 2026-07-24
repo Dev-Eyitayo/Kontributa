@@ -138,10 +138,6 @@ class AuthService:
         if user is None or not verify_password(payload.password, user.password_hash):
             raise AuthError("invalid email or password", code="invalid_credentials")
 
-        # An unverified account gets no tokens at all -- previously this was
-        # only enforced later, at purse-creation/payment time, which let an
-        # unverified user log in and poke around before hitting a confusing
-        # error. Applies to both roles; verification isn't role-specific.
         if not user.is_verified:
             raise ForbiddenError(
                 "verify your email before logging in", code="email_not_verified"

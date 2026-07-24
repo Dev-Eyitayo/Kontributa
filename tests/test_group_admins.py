@@ -45,10 +45,10 @@ async def test_onboard_success_and_me(client, db_session):
 
 
 async def test_onboard_never_grants_control_of_an_existing_group(client, db_session):
-    """Part 1's core fix: the old request shape (organization_id + an
-    existing group_id) no longer exists at all -- there is no field in
-    the request that can even name an existing group, so there is no way
-    for a new admin to end up controlling one they didn't create."""
+    """The old request shape (organization_id + an existing group_id) no
+    longer exists at all -- there is no field in the request that can even
+    name an existing group, so there is no way for a new admin to end up
+    controlling one they didn't create."""
     org, existing_group = await create_org_and_group(db_session)
     headers = await _register_and_login_group_admin(client)
 

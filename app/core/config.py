@@ -21,7 +21,6 @@ class Settings(BaseSettings):
     APP_DB_ROLE: str = "kontributa_app"
     APP_DB_PASSWORD: str = "kontributa_app_password"
 
-
     TEST_DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/kontributa_test"
     TEST_RUNTIME_DATABASE_URL: str = (
         "postgresql+asyncpg://kontributa_app:kontributa_app_password@localhost:5432/kontributa_test"
@@ -52,7 +51,6 @@ class Settings(BaseSettings):
     RECONCILIATION_INTERVAL_MINUTES: int = 20
     RECONCILIATION_PENDING_THRESHOLD_MINUTES: int = 60
 
-    # Sandbox vs live is a config change only -- same pattern as Monnify above.
     SENDBYTE_BASE_URL: str = "https://api.sendbyte.africa"
     SENDBYTE_API_KEY: str = ""
     SENDBYTE_FROM_EMAIL: str = "noreply@kontributa.app"
@@ -66,8 +64,6 @@ class Settings(BaseSettings):
     RATE_LIMIT_REGISTER_PER_HOUR: int = 10
     RATE_LIMIT_FORGOT_PASSWORD_PER_HOUR: int = 5
     RATE_LIMIT_REMIND_PER_MINUTE: int = 3
-
-
     RATE_LIMIT_VERIFY_EMAIL_PER_HOUR: int = 20
     RATE_LIMIT_RESET_PASSWORD_PER_HOUR: int = 20
 

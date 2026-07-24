@@ -126,8 +126,6 @@ class AuditService:
 
         return {"valid": True, "broken_at_id": None, "reason": None}
 
-    # -- Role-scoped reads -------------------------------------------------
-
     async def contribution_history_for_member(self, contribution_id: UUID, user_id: UUID) -> list[AuditLog]:
         contribution = await self.db.get(Contribution, contribution_id)
         if contribution is None:
@@ -254,7 +252,6 @@ class AuditService:
         )
         return list(result.scalars().all())
 
-    # -- Human-readable resolution for group-admin/member-facing responses --
     # A raw actor_id/entity_id means nothing to a Group Admin or Member --
     # only Platform Admin's own views (the cross-group feed) are allowed to
     # keep showing technical ids. Batched per distinct id rather than one

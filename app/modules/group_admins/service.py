@@ -101,15 +101,26 @@ class GroupAdminService:
             .order_by(GroupAdmin.created_at)
         )
         rows = result.all()
+        group_ids = [group.id for _, group, _ in rows]
+
+        members_counts: dict[UUID, int] = {}
+        purses_counts: dict[UUID, int] = {}
+        if group_ids:
+            member_rows = await self.db.execute(
+                select(Member.group_id, func.count())
+                .where(Member.group_id.in_(group_ids))
+                .group_by(Member.group_id)
+            )
+            members_counts = dict(member_rows.all())
+            purse_rows = await self.db.execute(
+                select(Purse.group_id, func.count())
+                .where(Purse.group_id.in_(group_ids))
+                .group_by(Purse.group_id)
+            )
+            purses_counts = dict(purse_rows.all())
 
         out = []
         for admin, group, org in rows:
-            members_count = (
-                await self.db.execute(select(func.count()).select_from(Member).where(Member.group_id == group.id))
-            ).scalar_one()
-            purses_count = (
-                await self.db.execute(select(func.count()).select_from(Purse).where(Purse.group_id == group.id))
-            ).scalar_one()
             out.append(
                 {
                     "id": group.id,
@@ -118,8 +129,8 @@ class GroupAdminService:
                     "organization_id": org.id,
                     "organization_name": org.name,
                     "cohort": admin.cohort,
-                    "members_count": members_count,
-                    "purses_count": purses_count,
+                    "members_count": members_counts.get(group.id, 0),
+                    "purses_count": purses_counts.get(group.id, 0),
                 }
             )
         return out
@@ -166,7 +177,6 @@ class GroupAdminService:
         offset: int = 0,
     ) -> tuple[list[tuple[Member, User, Optional[InviteLink]]], int]:
         admin = await self.get_admin_for_group(user_id, group_id)
-
 
         stmt = (
             select(Member, User, InviteLink)

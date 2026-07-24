@@ -11,7 +11,7 @@ from app.core.auth import (
     create_access_token,
 )
 from app.core.config import settings
-from app.core.exceptions import AuthError, ConflictError, NotFoundError
+from app.core.exceptions import AuthError, ConflictError, ForbiddenError, NotFoundError
 from app.core.security import hash_password, verify_password
 from app.modules.auth.models import User
 from app.modules.auth.schemas import (
@@ -137,6 +137,15 @@ class AuthService:
         user = await self._get_by_email(payload.email)
         if user is None or not verify_password(payload.password, user.password_hash):
             raise AuthError("invalid email or password", code="invalid_credentials")
+
+        # An unverified account gets no tokens at all -- previously this was
+        # only enforced later, at purse-creation/payment time, which let an
+        # unverified user log in and poke around before hitting a confusing
+        # error. Applies to both roles; verification isn't role-specific.
+        if not user.is_verified:
+            raise ForbiddenError(
+                "verify your email before logging in", code="email_not_verified"
+            )
 
         access = create_access_token(user.id, user.role.value)
         refresh_token, _ = await self.refresh_tokens.issue(user.id)

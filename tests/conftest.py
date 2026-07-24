@@ -14,6 +14,7 @@ from app.main import app
 from app.modules.payments.schemas import (
     MonnifyAccountName,
     MonnifyInvoice,
+    MonnifySubAccount,
     MonnifyTransactionStatus,
     MonnifyTransferResult,
 )
@@ -32,6 +33,7 @@ from app.modules.notifications import models as _notifications_models  # noqa: F
 from app.modules.organizations import models as _org_models  # noqa: F401
 from app.modules.organizations.models import Group, Organization, OrganizationType
 from app.modules.payouts import models as _payout_models  # noqa: F401
+from app.modules.platform_settings.models import PlatformSettings
 from app.modules.purses import models as _purse_models  # noqa: F401
 from app.modules.settlement import models as _settlement_models  # noqa: F401
 from app.modules.webhooks import models as _webhook_models  # noqa: F401
@@ -96,16 +98,28 @@ class FakeMonnifyClient:
 
     def __init__(self):
         self.created_invoices: list[str] = []
+        # Keyed by invoice_reference so a test can assert whether *this
+        # specific* invoice got a split config, not just "the last one".
+        self.invoice_split_configs: dict[str, list[dict] | None] = {}
         self.transaction_statuses: dict[str, MonnifyTransactionStatus] = {}
         self.account_names: dict[str, str] = {}
         self.bank_names: dict[str, str] = {}
         self.transfers: list[dict] = []
         self.transfer_should_fail = False
+        self.sub_accounts_created: list[dict] = []
 
     async def create_invoice(
-        self, invoice_reference, amount, customer_name, customer_email, description, expires_at
+        self,
+        invoice_reference,
+        amount,
+        customer_name,
+        customer_email,
+        description,
+        expires_at,
+        income_split_config=None,
     ) -> MonnifyInvoice:
         self.created_invoices.append(invoice_reference)
+        self.invoice_split_configs[invoice_reference] = income_split_config
         return MonnifyInvoice(
             invoice_reference=invoice_reference,
             account_number=f"90{len(self.created_invoices):08d}",
@@ -114,6 +128,19 @@ class FakeMonnifyClient:
             amount=amount,
             expires_at=expires_at,
         )
+
+    async def create_sub_account(self, bank_code, account_number, email, split_percentage) -> MonnifySubAccount:
+        code = f"SUB{len(self.sub_accounts_created) + 1:04d}"
+        self.sub_accounts_created.append(
+            {
+                "sub_account_code": code,
+                "bank_code": bank_code,
+                "account_number": account_number,
+                "email": email,
+                "split_percentage": split_percentage,
+            }
+        )
+        return MonnifySubAccount(sub_account_code=code, bank_code=bank_code, account_number=account_number)
 
     async def get_transaction_status(self, payment_reference: str) -> MonnifyTransactionStatus:
         if payment_reference in self.transaction_statuses:
@@ -229,6 +256,20 @@ async def db_setup():
     app.dependency_overrides.pop(get_sendbyte_client, None)
 
 
+@pytest_asyncio.fixture(autouse=True)
+async def default_platform_settings(db_setup):
+    """custodian_mode_enabled defaults to False in production (a fresh
+    deployment is Direct-only until a platform admin turns Custodian back
+    on -- see PlatformSettings), but almost this entire suite predates that
+    kill switch and exercises Custodian mode directly. Seeding it True here
+    keeps that established baseline intact; the handful of tests for the
+    kill switch itself explicitly flip it False via PATCH /admin/settings
+    (or by inserting their own row) to test the block."""
+    async with _state["session_local"]() as session:
+        session.add(PlatformSettings(custodian_mode_enabled=True))
+        await session.commit()
+
+
 @pytest_asyncio.fixture
 async def client(db_setup):
     transport = ASGITransport(app=app)
@@ -288,3 +329,34 @@ async def create_platform_admin(db_session, email: str = "admin@example.com") ->
     await db_session.commit()
     await db_session.refresh(admin)
     return admin
+
+
+async def onboard_group_admin(
+    client,
+    db_session,
+    org: Organization,
+    headers: dict,
+    group_name: str = "Onboarded Group",
+    cohort: str | None = None,
+) -> Group:
+    """POST /group-admins/onboard now always creates a brand-new Group --
+    there is no more "pick an existing group_id" path (that was the bug
+    Part 1 removed). Tests that used to onboard straight into
+    create_org_and_group's own Group now call this instead, and get back
+    the *actual* Group the onboard call created (fetched fresh from the
+    DB by the id in the response) -- every existing assertion that reads
+    `group.id`/`group.name`/`group.short_code` keeps working unchanged,
+    it just refers to the real onboarded group instead of a throwaway one.
+    A duplicate group_name within the same org is fine -- the backend
+    auto-dedupes the short_code on collision.
+    """
+    from uuid import UUID
+
+    payload: dict = {"organization_id": str(org.id), "new_group_name": group_name}
+    if cohort is not None:
+        payload["cohort"] = cohort
+    resp = await client.post("/group-admins/onboard", json=payload, headers=headers)
+    assert resp.status_code == 201, resp.text
+    group = await db_session.get(Group, UUID(resp.json()["data"]["group_id"]))
+    assert group is not None
+    return group

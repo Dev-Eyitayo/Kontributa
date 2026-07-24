@@ -8,11 +8,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import ForbiddenError, NotFoundError
 from app.modules.audit.models import AuditActorType, AuditChainHead, AuditLog
+from app.modules.auth.models import User
 from app.modules.contributions.models import Contribution
 from app.modules.group_admins.models import GroupAdmin
 from app.modules.members.models import Member
 from app.modules.payouts.models import Payout
 from app.modules.purses.models import Purse
+
+_AUTOMATED_ACTOR_LABELS = {
+    AuditActorType.WEBHOOK: "Automated (webhook)",
+    AuditActorType.RECONCILIATION_JOB: "Automated (reconciliation)",
+}
 
 
 def _serialize_state(state: Optional[dict]) -> str:
@@ -122,29 +128,41 @@ class AuditService:
 
     # -- Role-scoped reads -------------------------------------------------
 
-    async def contribution_history_for_member(self, contribution_id: UUID, member: Member) -> list[AuditLog]:
+    async def contribution_history_for_member(self, contribution_id: UUID, user_id: UUID) -> list[AuditLog]:
         contribution = await self.db.get(Contribution, contribution_id)
         if contribution is None:
             raise NotFoundError("contribution not found")
-        if contribution.member_id != member.id:
+        # Resolved via the contribution's own member_id, then checked
+        # against the caller -- resolving "the caller's member row" first
+        # would pick arbitrarily among a multi-group member's several rows.
+        member = await self.db.get(Member, contribution.member_id)
+        if member is None or member.user_id != user_id:
             raise ForbiddenError("cannot view another member's contribution history")
         return await self._entity_history("contribution", contribution_id)
 
-    async def contribution_history_for_admin(self, contribution_id: UUID, admin: GroupAdmin) -> list[AuditLog]:
+    async def contribution_history_for_admin(self, contribution_id: UUID, user_id: UUID) -> list[AuditLog]:
+        # Imported locally to avoid a module-level cycle (group_admins does
+        # not import audit, but keeping this import scoped here matches
+        # audit/service.py's existing pattern of only touching other
+        # modules' models, never their services, at module scope).
+        from app.modules.group_admins.service import GroupAdminService
+
         contribution = await self.db.get(Contribution, contribution_id)
         if contribution is None:
             raise NotFoundError("contribution not found")
         purse = await self.db.get(Purse, contribution.purse_id)
-        if purse is None or purse.group_id != admin.group_id:
+        if purse is None:
             raise ForbiddenError("cannot view a contribution outside your own group's purses")
+        await GroupAdminService(self.db).get_admin_for_group(user_id, purse.group_id)
         return await self._entity_history("contribution", contribution_id)
 
-    async def payout_history_for_admin(self, payout_id: UUID, admin: GroupAdmin) -> list[AuditLog]:
+    async def payout_history_for_admin(self, payout_id: UUID, user_id: UUID) -> list[AuditLog]:
+        from app.modules.group_admins.service import GroupAdminService
+
         payout = await self.db.get(Payout, payout_id)
         if payout is None:
             raise NotFoundError("payout not found")
-        if payout.group_id != admin.group_id:
-            raise ForbiddenError("cannot view another group's payout history")
+        await GroupAdminService(self.db).get_admin_for_group(user_id, payout.group_id)
         return await self._entity_history("payout", payout_id)
 
     async def payout_history_for_platform_admin(self, payout_id: UUID) -> list[AuditLog]:
@@ -153,15 +171,16 @@ class AuditService:
             raise NotFoundError("payout not found")
         return await self._entity_history("payout", payout_id)
 
-    async def purse_history_for_admin(self, purse_id: UUID, admin: GroupAdmin) -> list[AuditLog]:
+    async def purse_history_for_admin(self, purse_id: UUID, user_id: UUID) -> list[AuditLog]:
         """Full history for a purse: its own creation/edits/closures, plus
         every contribution and payout event tied to it -- the endpoint a
         treasury dispute gets resolved against."""
+        from app.modules.group_admins.service import GroupAdminService
+
         purse = await self.db.get(Purse, purse_id)
         if purse is None:
             raise NotFoundError("purse not found")
-        if purse.group_id != admin.group_id:
-            raise ForbiddenError("cannot view a purse outside your own group")
+        await GroupAdminService(self.db).get_admin_for_group(user_id, purse.group_id)
 
         contribution_ids_result = await self.db.execute(
             select(Contribution.id).where(Contribution.purse_id == purse_id)
@@ -234,3 +253,89 @@ class AuditService:
             .order_by(AuditLog.created_at, AuditLog.id)
         )
         return list(result.scalars().all())
+
+    # -- Human-readable resolution for group-admin/member-facing responses --
+    # A raw actor_id/entity_id means nothing to a Group Admin or Member --
+    # only Platform Admin's own views (the cross-group feed) are allowed to
+    # keep showing technical ids. Batched per distinct id rather than one
+    # query per audit row, since a purse's full history can run to dozens
+    # of entries.
+
+    async def resolve_actor_names(self, entries: list[AuditLog]) -> dict[UUID, str]:
+        group_admin_ids = {e.actor_id for e in entries if e.actor_type == AuditActorType.GROUP_ADMIN and e.actor_id}
+        member_ids = {e.actor_id for e in entries if e.actor_type == AuditActorType.MEMBER and e.actor_id}
+        platform_admin_user_ids = {
+            e.actor_id for e in entries if e.actor_type == AuditActorType.PLATFORM_ADMIN and e.actor_id
+        }
+
+        user_ids_by_actor_id: dict[UUID, UUID] = {}
+        if group_admin_ids:
+            rows = (
+                await self.db.execute(select(GroupAdmin.id, GroupAdmin.user_id).where(GroupAdmin.id.in_(group_admin_ids)))
+            ).all()
+            user_ids_by_actor_id.update({row[0]: row[1] for row in rows})
+        if member_ids:
+            rows = (
+                await self.db.execute(select(Member.id, Member.user_id).where(Member.id.in_(member_ids)))
+            ).all()
+            user_ids_by_actor_id.update({row[0]: row[1] for row in rows})
+        for actor_id in platform_admin_user_ids:
+            user_ids_by_actor_id[actor_id] = actor_id
+
+        all_user_ids = set(user_ids_by_actor_id.values())
+        names_by_user_id: dict[UUID, str] = {}
+        if all_user_ids:
+            rows = (
+                await self.db.execute(
+                    select(User.id, User.first_name, User.last_name).where(User.id.in_(all_user_ids))
+                )
+            ).all()
+            names_by_user_id = {row[0]: f"{row[1]} {row[2]}" for row in rows}
+
+        result: dict[UUID, str] = {}
+        for entry in entries:
+            if entry.actor_id is None:
+                continue
+            if entry.actor_type in _AUTOMATED_ACTOR_LABELS:
+                continue
+            user_id = user_ids_by_actor_id.get(entry.actor_id)
+            if user_id is not None and user_id in names_by_user_id:
+                result[entry.actor_id] = names_by_user_id[user_id]
+        return result
+
+    @staticmethod
+    def actor_label(entry: AuditLog, resolved_names: dict[UUID, str]) -> Optional[str]:
+        if entry.actor_type in _AUTOMATED_ACTOR_LABELS:
+            return _AUTOMATED_ACTOR_LABELS[entry.actor_type]
+        if entry.actor_id is not None:
+            return resolved_names.get(entry.actor_id)
+        return None
+
+    async def resolve_entity_labels(self, entries: list[AuditLog]) -> dict[UUID, str]:
+        """Purse-history-only: an entry's entity_id is the purse's own id,
+        a contribution id, or a payout id depending on entity_type -- none
+        meaningful to a Group Admin as a bare UUID."""
+        contribution_ids = {e.entity_id for e in entries if e.entity_type == "contribution"}
+        payout_ids = {e.entity_id for e in entries if e.entity_type == "payout"}
+        purse_ids = {e.entity_id for e in entries if e.entity_type == "purse"}
+
+        labels: dict[UUID, str] = {}
+        if contribution_ids:
+            rows = (
+                await self.db.execute(
+                    select(Contribution.id, User.first_name, User.last_name)
+                    .join(Member, Contribution.member_id == Member.id)
+                    .join(User, Member.user_id == User.id)
+                    .where(Contribution.id.in_(contribution_ids))
+                )
+            ).all()
+            labels.update({row[0]: f"{row[1]} {row[2]}'s contribution" for row in rows})
+        if payout_ids:
+            rows = (
+                await self.db.execute(select(Payout.id, Payout.amount).where(Payout.id.in_(payout_ids)))
+            ).all()
+            labels.update({row[0]: f"Payout of {row[1]}" for row in rows})
+        if purse_ids:
+            rows = (await self.db.execute(select(Purse.id, Purse.title).where(Purse.id.in_(purse_ids)))).all()
+            labels.update({row[0]: row[1] for row in rows})
+        return labels

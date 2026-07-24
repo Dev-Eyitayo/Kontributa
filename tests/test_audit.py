@@ -6,7 +6,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 
 from app.modules.audit.service import AuditService
-from tests.conftest import create_org_and_group, find_redis_token
+from tests.conftest import create_org_and_group, find_redis_token, onboard_group_admin
 
 
 async def _register_and_login_group_admin(client, email="rep@example.com"):
@@ -31,16 +31,14 @@ def _future_deadline(days=7) -> str:
 
 
 async def _setup_purse_with_paid_contribution(client, db_session, email="rep@example.com"):
-    org, group = await create_org_and_group(db_session)
+    org, _existing_group = await create_org_and_group(db_session)
     admin_token = await _register_and_login_group_admin(client, email=email)
     headers = {"Authorization": f"Bearer {admin_token}"}
-    await client.post(
-        "/group-admins/onboard",
-        json={"organization_id": str(org.id), "group_id": str(group.id)},
-        headers=headers,
-    )
+    group = await onboard_group_admin(client, db_session, org, headers)
 
-    invite = await client.post("/group-admins/invite-links", json={"expires_in_days": 7}, headers=headers)
+    invite = await client.post(
+        f"/group-admins/invite-links?group_id={group.id}", json={"expires_in_days": 7}, headers=headers
+    )
     token = invite.json()["data"]["token"]
     member_email = f"member-{email}"
     member_token_resp = await client.post(
@@ -48,12 +46,20 @@ async def _setup_purse_with_paid_contribution(client, db_session, email="rep@exa
         json={"email": member_email, "password": "password123", "first_name": "Member", "last_name": "One"},
     )
     assert member_token_resp.status_code in (200, 201), member_token_resp.text
+    member_verify_token = await find_redis_token("verify_email")
+    await client.post("/auth/verify-email", json={"email": member_email, "token": member_verify_token})
     member_login = await client.post("/auth/login", json={"email": member_email, "password": "password123"})
     member_headers = {"Authorization": f"Bearer {member_login.json()['data']['access_token']}"}
 
     create = await client.post(
         "/purses",
-        json={"title": "Fee", "amount": "2500.00", "deadline": _future_deadline(), "enroll_mode": "snapshot"},
+        json={
+            "group_id": str(group.id),
+            "title": "Fee",
+            "amount": "2500.00",
+            "deadline": _future_deadline(),
+            "enroll_mode": "snapshot",
+        },
         headers=headers,
     )
     purse_id = create.json()["data"]["id"]
@@ -98,26 +104,26 @@ async def test_contribution_audit_forbidden_for_other_member_and_other_group_rep
         client, db_session, email="rep-a@example.com"
     )
 
-    other_org, other_group = await create_org_and_group(
+    other_org, _existing_other_group = await create_org_and_group(
         db_session, org_name="Other Uni", org_short_code="OU9", group_name="Other Dept", group_short_code="OD9"
     )
     other_admin_token = await _register_and_login_group_admin(client, email="rep-b@example.com")
     other_headers = {"Authorization": f"Bearer {other_admin_token}"}
-    await client.post(
-        "/group-admins/onboard",
-        json={"organization_id": str(other_org.id), "group_id": str(other_group.id)},
-        headers=other_headers,
-    )
+    await onboard_group_admin(client, db_session, other_org, other_headers, group_name="Other Group")
 
     resp = await client.get(f"/audit/contributions/{contribution_id}", headers=other_headers)
     assert resp.status_code == 403
 
     # A second, unrelated member (in the same group) must not see this contribution either.
-    invite = await client.post("/group-admins/invite-links", json={"expires_in_days": 7}, headers=headers)
+    invite = await client.post(f"/group-admins/invite-links?group_id={group.id}", json={"expires_in_days": 7}, headers=headers)
     token = invite.json()["data"]["token"]
     await client.post(
         f"/members/join/{token}",
         json={"email": "second-member@example.com", "password": "password123", "first_name": "Second", "last_name": "Member"},
+    )
+    second_verify_token = await find_redis_token("verify_email")
+    await client.post(
+        "/auth/verify-email", json={"email": "second-member@example.com", "token": second_verify_token}
     )
     second_login = await client.post(
         "/auth/login", json={"email": "second-member@example.com", "password": "password123"}
@@ -154,16 +160,12 @@ async def test_purse_audit_scoped_to_own_group(client, db_session):
         client, db_session, email="rep-c@example.com"
     )
 
-    other_org, other_group = await create_org_and_group(
+    other_org, _existing_other_group = await create_org_and_group(
         db_session, org_name="Other Uni", org_short_code="OU8", group_name="Other Dept", group_short_code="OD8"
     )
     other_admin_token = await _register_and_login_group_admin(client, email="rep-d@example.com")
     other_headers = {"Authorization": f"Bearer {other_admin_token}"}
-    await client.post(
-        "/group-admins/onboard",
-        json={"organization_id": str(other_org.id), "group_id": str(other_group.id)},
-        headers=other_headers,
-    )
+    await onboard_group_admin(client, db_session, other_org, other_headers, group_name="Other Group")
 
     resp = await client.get(f"/audit/purses/{purse_id}", headers=other_headers)
     assert resp.status_code == 403

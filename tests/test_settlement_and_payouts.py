@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 from app.core.auth import create_access_token
-from tests.conftest import _state, create_org_and_group, create_platform_admin, find_redis_token
+from tests.conftest import _state, create_org_and_group, create_platform_admin, find_redis_token, onboard_group_admin
 
 
 async def _admin_platform_headers(db_session):
@@ -34,16 +34,14 @@ def _future_deadline(days=7) -> str:
 
 
 async def _setup_purse_with_paid_contribution(client, db_session, collected="2500.00", email="rep@example.com"):
-    org, group = await create_org_and_group(db_session)
+    org, _existing_group = await create_org_and_group(db_session)
     admin_token = await _register_and_login_group_admin(client, email=email)
     headers = {"Authorization": f"Bearer {admin_token}"}
-    await client.post(
-        "/group-admins/onboard",
-        json={"organization_id": str(org.id), "group_id": str(group.id)},
-        headers=headers,
-    )
+    group = await onboard_group_admin(client, db_session, org, headers)
 
-    invite = await client.post("/group-admins/invite-links", json={"expires_in_days": 7}, headers=headers)
+    invite = await client.post(
+        f"/group-admins/invite-links?group_id={group.id}", json={"expires_in_days": 7}, headers=headers
+    )
     token = invite.json()["data"]["token"]
     await client.post(
         f"/members/join/{token}",
@@ -52,7 +50,13 @@ async def _setup_purse_with_paid_contribution(client, db_session, collected="250
 
     create = await client.post(
         "/purses",
-        json={"title": "Fee", "amount": collected, "deadline": _future_deadline(), "enroll_mode": "snapshot"},
+        json={
+            "group_id": str(group.id),
+            "title": "Fee",
+            "amount": collected,
+            "deadline": _future_deadline(),
+            "enroll_mode": "snapshot",
+        },
         headers=headers,
     )
     purse_id = create.json()["data"]["id"]
@@ -74,7 +78,7 @@ async def _setup_purse_with_paid_contribution(client, db_session, collected="250
     return org, group, headers, purse_id
 
 
-async def _add_purse_with_collected_amount(client, db_session, headers, collected, suffix):
+async def _add_purse_with_collected_amount(client, db_session, headers, group_id, collected, suffix):
     """Adds another purse (snapshotting the group's existing member(s), same
     as _setup_purse_with_paid_contribution's initial purse) and fully pays
     it. Deliberately does not invite a new member -- snapshot mode captures
@@ -83,7 +87,13 @@ async def _add_purse_with_collected_amount(client, db_session, headers, collecte
     for the group's original member too."""
     create = await client.post(
         "/purses",
-        json={"title": f"Fee {suffix}", "amount": collected, "deadline": _future_deadline(), "enroll_mode": "snapshot"},
+        json={
+            "group_id": str(group_id),
+            "title": f"Fee {suffix}",
+            "amount": collected,
+            "deadline": _future_deadline(),
+            "enroll_mode": "snapshot",
+        },
         headers=headers,
     )
     purse_id = create.json()["data"]["id"]
@@ -161,7 +171,7 @@ async def test_list_banks_is_cached_between_calls(client, db_session):
 async def test_list_banks_requires_group_admin_role(client, db_session):
     org, group, headers, purse_id = await _setup_purse_with_paid_contribution(client, db_session)
 
-    invite = await client.post("/group-admins/invite-links", json={"expires_in_days": 7}, headers=headers)
+    invite = await client.post(f"/group-admins/invite-links?group_id={group.id}", json={"expires_in_days": 7}, headers=headers)
     token = invite.json()["data"]["token"]
     join = await client.post(
         f"/members/join/{token}",
@@ -172,6 +182,8 @@ async def test_list_banks_requires_group_admin_role(client, db_session):
             "last_name": "Member",
         },
     )
+    verify_token = await find_redis_token("verify_email")
+    await client.post("/auth/verify-email", json={"email": "banks-member@example.com", "token": verify_token})
     login = await client.post(
         "/auth/login", json={"email": "banks-member@example.com", "password": "password123"}
     )
@@ -214,16 +226,12 @@ async def test_settlement_save_rejects_name_mismatch(client, db_session):
 async def test_settlement_scoped_to_own_group(client, db_session):
     org, group, headers, purse_id = await _setup_purse_with_paid_contribution(client, db_session)
 
-    other_org, other_group = await create_org_and_group(
+    other_org, _existing_other_group = await create_org_and_group(
         db_session, org_name="Other Uni", org_short_code="OU5", group_name="Other Dept", group_short_code="OD5"
     )
     other_admin_token = await _register_and_login_group_admin(client, email="other-rep@example.com")
     other_headers = {"Authorization": f"Bearer {other_admin_token}"}
-    await client.post(
-        "/group-admins/onboard",
-        json={"organization_id": str(other_org.id), "group_id": str(other_group.id)},
-        headers=other_headers,
-    )
+    await onboard_group_admin(client, db_session, other_org, other_headers, group_name="Other Group")
 
     resp = await client.get(f"/groups/{group.id}/settlement-account", headers=other_headers)
     assert resp.status_code == 403
@@ -438,8 +446,8 @@ async def test_sweep_payout_allocates_proportionally_across_purses(client, db_se
     org, group, headers, purse_a = await _setup_purse_with_paid_contribution(
         client, db_session, collected="1000.00", email="sweep-rep@example.com"
     )
-    purse_b = await _add_purse_with_collected_amount(client, db_session, headers, "2000.00", "b")
-    purse_c = await _add_purse_with_collected_amount(client, db_session, headers, "3000.00", "c")
+    purse_b = await _add_purse_with_collected_amount(client, db_session, headers, group.id, "2000.00", "b")
+    purse_c = await _add_purse_with_collected_amount(client, db_session, headers, group.id, "3000.00", "c")
     # group total collected = 1000 + 2000 + 3000 = 6000.00
 
     sweep = await client.post(
@@ -497,12 +505,14 @@ async def test_member_cannot_list_or_view_payouts(client, db_session):
     )
     payout_id = create.json()["data"]["id"]
 
-    invite = await client.post("/group-admins/invite-links", json={"expires_in_days": 7}, headers=headers)
+    invite = await client.post(f"/group-admins/invite-links?group_id={group.id}", json={"expires_in_days": 7}, headers=headers)
     token = invite.json()["data"]["token"]
     await client.post(
         f"/members/join/{token}",
         json={"email": "onlooker@example.com", "password": "password123", "first_name": "On", "last_name": "Looker"},
     )
+    verify_token = await find_redis_token("verify_email")
+    await client.post("/auth/verify-email", json={"email": "onlooker@example.com", "token": verify_token})
     login = await client.post("/auth/login", json={"email": "onlooker@example.com", "password": "password123"})
     member_headers = {"Authorization": f"Bearer {login.json()['data']['access_token']}"}
 
@@ -530,3 +540,288 @@ async def test_platform_admin_can_list_and_view_all_payouts(client, db_session):
     detail_resp = await client.get(f"/payouts/{payout_id}", headers=admin_headers)
     assert detail_resp.status_code == 200
     assert detail_resp.json()["data"]["id"] == payout_id
+
+
+# --- Part 2: dual settlement mode ------------------------------------------
+
+
+async def test_settlement_direct_save_creates_sub_account_and_sets_mode(client, db_session):
+    org, group, headers, purse_id = await _setup_purse_with_paid_contribution(client, db_session)
+
+    resp = await client.post(
+        f"/groups/{group.id}/settlement-account/direct",
+        json={
+            "bank_code": "058",
+            "account_number": "0123456789",
+            "confirmed_account_name": "Default Resolved Name",
+        },
+        headers=headers,
+    )
+    assert resp.status_code == 201, resp.text
+    body = resp.json()["data"]
+    assert body["settlement_mode"] == "direct"
+    assert body["direct_sub_account_code"]
+
+    assert len(_state["monnify"].sub_accounts_created) == 1
+    created = _state["monnify"].sub_accounts_created[0]
+    assert created["sub_account_code"] == body["direct_sub_account_code"]
+
+    get_resp = await client.get(f"/groups/{group.id}/settlement-account", headers=headers)
+    assert get_resp.json()["data"]["settlement_mode"] == "direct"
+
+
+async def test_settlement_direct_save_rejects_name_mismatch(client, db_session):
+    """No override path in either mode -- a mismatch blocks saving outright,
+    the same as custodian mode."""
+    org, group, headers, purse_id = await _setup_purse_with_paid_contribution(client, db_session)
+
+    resp = await client.post(
+        f"/groups/{group.id}/settlement-account/direct",
+        json={
+            "bank_code": "058",
+            "account_number": "0123456789",
+            "confirmed_account_name": "A Totally Different Name",
+        },
+        headers=headers,
+    )
+    assert resp.status_code == 422
+    assert resp.json()["error"]["code"] == "account_name_mismatch"
+    assert len(_state["monnify"].sub_accounts_created) == 0
+
+    get_resp = await client.get(f"/groups/{group.id}/settlement-account", headers=headers)
+    assert get_resp.status_code == 404
+
+
+async def _setup_purse_with_verified_pending_member(client, db_session, email="rep@example.com", org=None):
+    """A group admin, a *verified* member with a live pending contribution,
+    and the purse it's against -- generate-invoice requires a verified
+    member, unlike _setup_purse_with_paid_contribution's member (never
+    logged in/verified, and its own contribution is already resolved)."""
+    if org is None:
+        org, _existing_group = await create_org_and_group(db_session)
+    admin_token = await _register_and_login_group_admin(client, email=email)
+    headers = {"Authorization": f"Bearer {admin_token}"}
+    group = await onboard_group_admin(client, db_session, org, headers)
+
+    invite = await client.post(
+        f"/group-admins/invite-links?group_id={group.id}", json={"expires_in_days": 7}, headers=headers
+    )
+    token = invite.json()["data"]["token"]
+    member_email = f"member-{email}"
+    await client.post(
+        f"/members/join/{token}",
+        json={"email": member_email, "password": "password123", "first_name": "Member", "last_name": "One"},
+    )
+    member_verify_token = await find_redis_token("verify_email")
+    await client.post("/auth/verify-email", json={"email": member_email, "token": member_verify_token})
+    member_login = await client.post("/auth/login", json={"email": member_email, "password": "password123"})
+    member_headers = {"Authorization": f"Bearer {member_login.json()['data']['access_token']}"}
+
+    create = await client.post(
+        "/purses",
+        json={
+            "group_id": str(group.id),
+            "title": "Fee",
+            "amount": "500.00",
+            "deadline": _future_deadline(),
+            "enroll_mode": "snapshot",
+        },
+        headers=headers,
+    )
+    purse_id = create.json()["data"]["id"]
+    contributions = await client.get(f"/purses/{purse_id}/contributions", headers=headers)
+    contribution_id = contributions.json()["data"]["items"][0]["id"]
+
+    return org, group, headers, member_headers, contribution_id
+
+
+async def test_custodian_mode_invoice_has_no_split_config(client, db_session):
+    org, group, headers, member_headers, contribution_id = await _setup_purse_with_verified_pending_member(
+        client, db_session, email="custodian-rep@example.com"
+    )
+
+    invoice = await client.post(f"/contributions/{contribution_id}/generate-invoice", headers=member_headers)
+    assert invoice.status_code == 200, invoice.text
+
+    assert len(_state["monnify"].created_invoices) == 1
+    real_reference = _state["monnify"].created_invoices[0]
+    assert _state["monnify"].invoice_split_configs[real_reference] is None
+
+
+async def test_direct_mode_invoice_has_split_config(client, db_session):
+    org, group, headers, member_headers, contribution_id = await _setup_purse_with_verified_pending_member(
+        client, db_session, email="direct-rep@example.com"
+    )
+    switch = await client.post(
+        f"/groups/{group.id}/settlement-account/direct",
+        json={"bank_code": "058", "account_number": "0123456789", "confirmed_account_name": "Default Resolved Name"},
+        headers=headers,
+    )
+    assert switch.status_code == 201, switch.text
+    sub_account_code = switch.json()["data"]["direct_sub_account_code"]
+
+    invoice = await client.post(f"/contributions/{contribution_id}/generate-invoice", headers=member_headers)
+    assert invoice.status_code == 200, invoice.text
+
+    assert len(_state["monnify"].created_invoices) == 1
+    real_reference = _state["monnify"].created_invoices[0]
+    split_config = _state["monnify"].invoice_split_configs[real_reference]
+    assert split_config is not None
+    assert split_config[0]["subAccountCode"] == sub_account_code
+
+
+async def test_switch_custodian_to_direct_blocked_with_outstanding_balance(client, db_session):
+    org, group, headers, purse_id = await _setup_purse_with_paid_contribution(client, db_session, collected="2500.00")
+    await _register_settlement_account(client, group.id, headers)
+
+    resp = await client.patch(
+        f"/groups/{group.id}/settlement-account/mode", json={"new_mode": "direct"}, headers=headers
+    )
+    assert resp.status_code == 422
+    assert resp.json()["error"]["code"] == "outstanding_custodian_balance"
+    assert resp.json()["error"]["details"]["available_balance"] == "2500.00"
+
+    get_resp = await client.get(f"/groups/{group.id}/settlement-account", headers=headers)
+    assert get_resp.json()["data"]["settlement_mode"] == "custodian"
+
+
+async def test_switch_custodian_to_direct_succeeds_once_balance_is_paid_out(client, db_session):
+    org, group, headers, purse_id = await _setup_purse_with_paid_contribution(client, db_session, collected="2500.00")
+    await _register_settlement_account(client, group.id, headers)
+
+    payout = await client.post(
+        "/payouts", json={"group_id": str(group.id), "purse_id": purse_id, "amount": "2500.00"}, headers=headers
+    )
+    assert payout.status_code == 201, payout.text
+
+    resp = await client.patch(
+        f"/groups/{group.id}/settlement-account/mode", json={"new_mode": "direct"}, headers=headers
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["data"]["settlement_mode"] == "direct"
+    assert len(_state["monnify"].sub_accounts_created) == 1
+
+
+async def test_switch_direct_to_custodian_always_allowed(client, db_session):
+    org, group, headers, purse_id = await _setup_purse_with_paid_contribution(client, db_session)
+
+    await client.post(
+        f"/groups/{group.id}/settlement-account/direct",
+        json={"bank_code": "058", "account_number": "0123456789", "confirmed_account_name": "Default Resolved Name"},
+        headers=headers,
+    )
+
+    resp = await client.patch(
+        f"/groups/{group.id}/settlement-account/mode", json={"new_mode": "custodian"}, headers=headers
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["data"]["settlement_mode"] == "custodian"
+
+
+async def test_direct_mode_available_balance_is_distinct_from_custodian_zero(client, db_session):
+    # Custodian-mode purse with nothing collected yet (no mark-manual/webhook
+    # applied) -- the genuine "zero" case a direct-mode purse's response
+    # must never look indistinguishable from.
+    org_z, _existing_group_z = await create_org_and_group(
+        db_session, org_name="Zero Uni", org_short_code="ZU1", group_name="Zero Dept", group_short_code="ZD1"
+    )
+    _org_z2, group_z, headers_z, _member_headers_z, contribution_id_z = await _setup_purse_with_verified_pending_member(
+        client, db_session, email="zero-rep@example.com", org=org_z
+    )
+    contribution_detail = await client.get(f"/contributions/{contribution_id_z}", headers=headers_z)
+    purse_z = contribution_detail.json()["data"]["purse_id"]
+
+    zero_balance = await client.get(f"/purses/{purse_z}/available-balance", headers=headers_z)
+    assert zero_balance.json()["data"]["settlement_mode"] == "custodian"
+    # A genuine zero collects as a bare "0", not "0.00" -- see
+    # docs/known-limitations.md's note on paid_out_total; the real
+    # assertion here is that it's a string "0", not the null this same
+    # field is in direct mode below.
+    assert Decimal(zero_balance.json()["data"]["available_balance"]) == Decimal("0")
+
+    # Direct-mode purse -- must carry settlement_mode: "direct" and null
+    # money fields, never a bare "0" that reads the same as the case above.
+    org, group, headers, purse_id = await _setup_purse_with_paid_contribution(
+        client, db_session, collected="2500.00", email="direct-rep@example.com"
+    )
+    await client.post(
+        f"/groups/{group.id}/settlement-account/direct",
+        json={"bank_code": "058", "account_number": "0123456789", "confirmed_account_name": "Default Resolved Name"},
+        headers=headers,
+    )
+
+    direct_balance = await client.get(f"/purses/{purse_id}/available-balance", headers=headers)
+    assert direct_balance.status_code == 200
+    body = direct_balance.json()["data"]
+    assert body["settlement_mode"] == "direct"
+    assert body["available_balance"] is None
+    assert body["collected_total"] is None
+    assert body["paid_out_total"] is None
+
+
+async def test_direct_mode_payout_request_rejected(client, db_session):
+    org, group, headers, purse_id = await _setup_purse_with_paid_contribution(client, db_session, collected="2500.00")
+    await client.post(
+        f"/groups/{group.id}/settlement-account/direct",
+        json={"bank_code": "058", "account_number": "0123456789", "confirmed_account_name": "Default Resolved Name"},
+        headers=headers,
+    )
+
+    resp = await client.post(
+        "/payouts", json={"group_id": str(group.id), "purse_id": purse_id, "amount": "100.00"}, headers=headers
+    )
+    assert resp.status_code == 422
+    assert resp.json()["error"]["code"] == "direct_mode_no_payout"
+
+
+async def test_custodian_save_rejected_when_kill_switch_off(client, db_session):
+    org, group, headers, purse_id = await _setup_purse_with_paid_contribution(client, db_session)
+
+    admin_headers = await _admin_platform_headers(db_session)
+    disable = await client.patch(
+        "/admin/settings", json={"custodian_mode_enabled": False}, headers=admin_headers
+    )
+    assert disable.status_code == 200, disable.text
+    assert disable.json()["data"]["custodian_mode_enabled"] is False
+
+    options = await client.get(f"/groups/{group.id}/settlement-options", headers=headers)
+    assert options.json()["data"]["custodian_mode_enabled"] is False
+
+    save = await client.post(
+        f"/groups/{group.id}/settlement-account",
+        json={"bank_code": "058", "account_number": "0123456789", "confirmed_account_name": "Default Resolved Name"},
+        headers=headers,
+    )
+    assert save.status_code == 403
+    assert save.json()["error"]["code"] == "custodian_mode_disabled"
+
+    # Direct mode is entirely unaffected -- it's the only mode reachable
+    # while the switch is off.
+    direct_save = await client.post(
+        f"/groups/{group.id}/settlement-account/direct",
+        json={"bank_code": "058", "account_number": "0123456789", "confirmed_account_name": "Default Resolved Name"},
+        headers=headers,
+    )
+    assert direct_save.status_code == 201, direct_save.text
+    assert direct_save.json()["data"]["settlement_mode"] == "direct"
+
+
+async def test_switch_to_custodian_rejected_when_kill_switch_off(client, db_session):
+    org, group, headers, purse_id = await _setup_purse_with_paid_contribution(client, db_session)
+    await client.post(
+        f"/groups/{group.id}/settlement-account/direct",
+        json={"bank_code": "058", "account_number": "0123456789", "confirmed_account_name": "Default Resolved Name"},
+        headers=headers,
+    )
+
+    admin_headers = await _admin_platform_headers(db_session)
+    await client.patch("/admin/settings", json={"custodian_mode_enabled": False}, headers=admin_headers)
+
+    switch = await client.patch(
+        f"/groups/{group.id}/settlement-account/mode", json={"new_mode": "custodian"}, headers=headers
+    )
+    assert switch.status_code == 403
+    assert switch.json()["error"]["code"] == "custodian_mode_disabled"
+
+    get_resp = await client.get(f"/groups/{group.id}/settlement-account", headers=headers)
+    assert get_resp.json()["data"]["settlement_mode"] == "direct"

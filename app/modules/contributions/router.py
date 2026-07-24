@@ -53,17 +53,22 @@ def _contribution_out(c: Contribution) -> dict:
 
 
 async def _assert_member_owns(db: AsyncSession, current_user: CurrentUser, contribution: Contribution) -> Member:
-    member = await MemberService(db).get_by_user_id(current_user.id)
-    if contribution.member_id != member.id:
+    # Resolved via the contribution's *own* member_id, then checked against
+    # the caller -- not "resolve the caller's member row, then compare",
+    # which picks arbitrarily among a multi-group member's several Member
+    # rows and would wrongly reject a contribution that legitimately
+    # belongs to a different one of their groups.
+    member = await MemberService(db).get_by_id(contribution.member_id)
+    if member.user_id != current_user.id:
         raise ForbiddenError("cannot access another member's contribution")
     return member
 
 
 async def _assert_admin_owns(db: AsyncSession, current_user: CurrentUser, contribution: Contribution):
-    admin = await GroupAdminService(db).get_by_user_id(current_user.id)
     purse = await db.get(Purse, contribution.purse_id)
-    if purse is None or purse.group_id != admin.group_id:
+    if purse is None:
         raise ForbiddenError("cannot access a contribution outside your own group's purses")
+    admin = await GroupAdminService(db).get_admin_for_group(current_user.id, purse.group_id)
     return admin, purse
 
 

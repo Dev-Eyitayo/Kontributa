@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.core.auth import CurrentUser, get_current_group_admin_user
 from app.core.config import settings
 from app.core.db import get_db
-from app.core.exceptions import BusinessRuleError, ForbiddenError, NotFoundError
+from app.core.exceptions import BusinessRuleError, NotFoundError
 from app.core.ratelimit import check_rate_limit
 from app.core.redis import get_redis
 from app.core.response import StandardResponse, success_response
@@ -31,7 +31,15 @@ async def remind_purse(
     redis: Redis = Depends(get_redis),
     sendbyte: SendByteClient = Depends(get_sendbyte_client),
 ) -> JSONResponse:
-    admin = await GroupAdminService(db).get_by_user_id(current_user.id)
+    # Row lock so two near-simultaneous requests for the same purse can't
+    # both read a stale last_reminder_sent_at and both slip past the
+    # cooldown check -- same class of race the payout balance checks guard
+    # against elsewhere in this codebase.
+    result = await db.execute(select(Purse).where(Purse.id == purse_id).with_for_update())
+    purse = result.scalar_one_or_none()
+    if purse is None:
+        raise NotFoundError("purse not found")
+    admin = await GroupAdminService(db).get_admin_for_group(current_user.id, purse.group_id)
 
     # Lightweight per-admin throttle against rapid retries/abuse -- the
     # substantive gate against exhausting the SendByte quota is the
@@ -43,17 +51,6 @@ async def remind_purse(
 
     if not settings.REMINDERS_ENABLED:
         raise BusinessRuleError("reminder emails are currently disabled", code="reminders_disabled")
-
-    # Row lock so two near-simultaneous requests for the same purse can't
-    # both read a stale last_reminder_sent_at and both slip past the
-    # cooldown check -- same class of race the payout balance checks guard
-    # against elsewhere in this codebase.
-    result = await db.execute(select(Purse).where(Purse.id == purse_id).with_for_update())
-    purse = result.scalar_one_or_none()
-    if purse is None:
-        raise NotFoundError("purse not found")
-    if purse.group_id != admin.group_id:
-        raise ForbiddenError("cannot send reminders for a purse outside your group")
 
     if purse.last_reminder_sent_at is not None:
         elapsed = datetime.now(timezone.utc) - purse.last_reminder_sent_at

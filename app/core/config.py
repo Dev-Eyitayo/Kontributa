@@ -21,12 +21,7 @@ class Settings(BaseSettings):
     APP_DB_ROLE: str = "kontributa_app"
     APP_DB_PASSWORD: str = "kontributa_app_password"
 
-    # A DIFFERENT database from the two above, on purpose. tests/conftest.py
-    # runs Base.metadata.drop_all + create_all at the start of every pytest
-    # session -- pointed at DATABASE_URL/RUNTIME_DATABASE_URL, that would
-    # wipe real dev data on every test run (this happened for real: it's why
-    # this setting exists). Never repoint these at the same database name as
-    # DATABASE_URL/RUNTIME_DATABASE_URL.
+
     TEST_DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/kontributa_test"
     TEST_RUNTIME_DATABASE_URL: str = (
         "postgresql+asyncpg://kontributa_app:kontributa_app_password@localhost:5432/kontributa_test"
@@ -68,17 +63,11 @@ class Settings(BaseSettings):
     REMINDERS_ENABLED: bool = True
     REMINDER_MIN_INTERVAL_DAYS: int = 7
 
-    # Fixed-window request caps on the endpoints that can trigger a SendByte
-    # send, so a burst of traffic (or abuse) can't quietly exhaust the free
-    # tier. Deliberately conservative defaults; raise via env var if needed.
     RATE_LIMIT_REGISTER_PER_HOUR: int = 10
     RATE_LIMIT_FORGOT_PASSWORD_PER_HOUR: int = 5
     RATE_LIMIT_REMIND_PER_MINUTE: int = 3
 
-    # Consumption-side caps: verify-email and reset-password now take a
-    # 6-digit code (1,000,000 possibilities, no lockout otherwise) rather
-    # than a long opaque token -- without a guess limit here, that's brute
-    # forceable within a code's TTL window with a plain script.
+
     RATE_LIMIT_VERIFY_EMAIL_PER_HOUR: int = 20
     RATE_LIMIT_RESET_PASSWORD_PER_HOUR: int = 20
 

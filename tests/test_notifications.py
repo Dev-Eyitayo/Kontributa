@@ -11,7 +11,7 @@ from app.core.config import settings
 from app.modules.contributions.models import Contribution
 from app.modules.notifications.models import NotificationLog
 from app.modules.purses.models import Purse
-from tests.conftest import _state, create_org_and_group, create_platform_admin, find_redis_token
+from tests.conftest import _state, create_org_and_group, create_platform_admin, find_redis_token, onboard_group_admin
 
 
 async def _admin_platform_headers(db_session):
@@ -53,17 +53,13 @@ def _future_deadline(days=7) -> str:
 
 
 async def _setup_purse_with_member(client, db_session, amount="2500.00"):
-    org, group = await create_org_and_group(db_session)
+    org, _existing_group = await create_org_and_group(db_session)
     admin_token = await _register_and_login_group_admin(client)
     admin_headers = {"Authorization": f"Bearer {admin_token}"}
-    await client.post(
-        "/group-admins/onboard",
-        json={"organization_id": str(org.id), "group_id": str(group.id)},
-        headers=admin_headers,
-    )
+    group = await onboard_group_admin(client, db_session, org, admin_headers)
 
     invite = await client.post(
-        "/group-admins/invite-links", json={"expires_in_days": 7}, headers=admin_headers
+        f"/group-admins/invite-links?group_id={group.id}", json={"expires_in_days": 7}, headers=admin_headers
     )
     token = invite.json()["data"]["token"]
     member_token = await _register_and_login_member(client, token, "ada@example.com")
@@ -71,7 +67,13 @@ async def _setup_purse_with_member(client, db_session, amount="2500.00"):
 
     create = await client.post(
         "/purses",
-        json={"title": "Project Defense Fee", "amount": amount, "deadline": _future_deadline(), "enroll_mode": "snapshot"},
+        json={
+            "group_id": str(group.id),
+            "title": "Project Defense Fee",
+            "amount": amount,
+            "deadline": _future_deadline(),
+            "enroll_mode": "snapshot",
+        },
         headers=admin_headers,
     )
     purse_id = create.json()["data"]["id"]
@@ -92,17 +94,13 @@ async def _setup_purse_with_member(client, db_session, amount="2500.00"):
 async def _setup_purse_with_two_members(client, db_session, amount="1000.00"):
     """One member gets marked paid immediately; the other is left pending --
     used to assert reminders go only to the still-pending one."""
-    org, group = await create_org_and_group(db_session)
+    org, _existing_group = await create_org_and_group(db_session)
     admin_token = await _register_and_login_group_admin(client)
     admin_headers = {"Authorization": f"Bearer {admin_token}"}
-    await client.post(
-        "/group-admins/onboard",
-        json={"organization_id": str(org.id), "group_id": str(group.id)},
-        headers=admin_headers,
-    )
+    group = await onboard_group_admin(client, db_session, org, admin_headers)
 
     invite = await client.post(
-        "/group-admins/invite-links", json={"expires_in_days": 7}, headers=admin_headers
+        f"/group-admins/invite-links?group_id={group.id}", json={"expires_in_days": 7}, headers=admin_headers
     )
     invite_token = invite.json()["data"]["token"]
     await _register_and_login_member(client, invite_token, "paid-member@example.com", "Paid", "Member")
@@ -110,7 +108,13 @@ async def _setup_purse_with_two_members(client, db_session, amount="1000.00"):
 
     create = await client.post(
         "/purses",
-        json={"title": "Dues", "amount": amount, "deadline": _future_deadline(), "enroll_mode": "snapshot"},
+        json={
+            "group_id": str(group.id),
+            "title": "Dues",
+            "amount": amount,
+            "deadline": _future_deadline(),
+            "enroll_mode": "snapshot",
+        },
         headers=admin_headers,
     )
     purse_id = create.json()["data"]["id"]
@@ -164,16 +168,14 @@ async def _generate_invoice(client, headers, contribution_id) -> dict:
 
 
 async def _setup_purse_with_paid_contribution(client, db_session, collected="2500.00", email="rep@example.com"):
-    org, group = await create_org_and_group(db_session)
+    org, _existing_group = await create_org_and_group(db_session)
     admin_token = await _register_and_login_group_admin(client, email=email)
     headers = {"Authorization": f"Bearer {admin_token}"}
-    await client.post(
-        "/group-admins/onboard",
-        json={"organization_id": str(org.id), "group_id": str(group.id)},
-        headers=headers,
-    )
+    group = await onboard_group_admin(client, db_session, org, headers)
 
-    invite = await client.post("/group-admins/invite-links", json={"expires_in_days": 7}, headers=headers)
+    invite = await client.post(
+        f"/group-admins/invite-links?group_id={group.id}", json={"expires_in_days": 7}, headers=headers
+    )
     token = invite.json()["data"]["token"]
     await client.post(
         f"/members/join/{token}",
@@ -182,7 +184,13 @@ async def _setup_purse_with_paid_contribution(client, db_session, collected="250
 
     create = await client.post(
         "/purses",
-        json={"title": "Fee", "amount": collected, "deadline": _future_deadline(), "enroll_mode": "snapshot"},
+        json={
+            "group_id": str(group.id),
+            "title": "Fee",
+            "amount": collected,
+            "deadline": _future_deadline(),
+            "enroll_mode": "snapshot",
+        },
         headers=headers,
     )
     purse_id = create.json()["data"]["id"]
@@ -477,16 +485,12 @@ async def test_remind_rate_limited_after_burst(client, db_session):
 async def test_remind_scoped_to_own_group(client, db_session):
     org, group, admin_headers, purse_id, pending_email = await _setup_purse_with_two_members(client, db_session)
 
-    other_org, other_group = await create_org_and_group(
+    other_org, _existing_other_group = await create_org_and_group(
         db_session, org_name="Other Uni", org_short_code="OU9", group_name="Other Dept", group_short_code="OD9"
     )
     other_token = await _register_and_login_group_admin(client, email="other-rep@example.com")
     other_headers = {"Authorization": f"Bearer {other_token}"}
-    await client.post(
-        "/group-admins/onboard",
-        json={"organization_id": str(other_org.id), "group_id": str(other_group.id)},
-        headers=other_headers,
-    )
+    await onboard_group_admin(client, db_session, other_org, other_headers, group_name="Other Group")
 
     resp = await client.post(f"/purses/{purse_id}/remind", headers=other_headers)
     assert resp.status_code == 403

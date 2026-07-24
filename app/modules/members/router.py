@@ -1,4 +1,7 @@
-from fastapi import APIRouter, Depends
+from typing import Optional
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,6 +23,7 @@ from app.modules.members.schemas import (
     MemberPurseListItem,
     MemberUpdateRequest,
     MemberUpdateResponse,
+    MyMemberGroupItem,
 )
 from app.modules.members.service import MemberService
 from app.modules.notifications.service import NotificationService, SendByteClient, get_sendbyte_client
@@ -74,12 +78,35 @@ async def join_additional_group(
     )
 
 
-@router.get("/me", response_model=StandardResponse[MemberMeResponse])
-async def get_me(
+@router.get("/me/groups", response_model=StandardResponse[list[MyMemberGroupItem]])
+async def list_my_groups(
     current_user: CurrentUser = Depends(get_current_member_user),
     service: MemberService = Depends(get_member_service),
 ) -> JSONResponse:
-    member, user, group = await service.get_me(current_user.id)
+    groups = await service.list_my_groups(current_user.id)
+    return success_response(
+        [
+            {
+                "id": str(g["id"]),
+                "name": g["name"],
+                "short_code": g["short_code"],
+                "organization_id": str(g["organization_id"]),
+                "organization_name": g["organization_name"],
+                "cohort": g["cohort"],
+                "member_id_number": g["member_id_number"],
+            }
+            for g in groups
+        ]
+    )
+
+
+@router.get("/me", response_model=StandardResponse[MemberMeResponse])
+async def get_me(
+    group_id: Optional[UUID] = Query(default=None),
+    current_user: CurrentUser = Depends(get_current_member_user),
+    service: MemberService = Depends(get_member_service),
+) -> JSONResponse:
+    member, user, group = await service.get_me(current_user.id, group_id)
     return success_response(
         {
             "id": str(member.id),
@@ -96,10 +123,11 @@ async def get_me(
 @router.patch("/me", response_model=StandardResponse[MemberUpdateResponse])
 async def update_me(
     payload: MemberUpdateRequest,
+    group_id: Optional[UUID] = Query(default=None),
     current_user: CurrentUser = Depends(get_current_member_user),
     service: MemberService = Depends(get_member_service),
 ) -> JSONResponse:
-    member, user = await service.update_me(current_user.id, payload)
+    member, user = await service.update_me(current_user.id, payload, group_id)
     return success_response(
         {
             "id": str(member.id),
@@ -113,11 +141,11 @@ async def update_me(
 @router.get("/me/purses", response_model=StandardResponse[list[MemberPurseListItem]])
 async def list_my_purses(
     current_user: CurrentUser = Depends(get_current_member_user),
-    member_service: MemberService = Depends(get_member_service),
     contribution_service: ContributionService = Depends(get_contribution_service),
 ) -> JSONResponse:
-    member = await member_service.get_by_user_id(current_user.id)
-    rows = await contribution_service.list_member_purses(member.id)
+    # Spans every group this user is a Member of, not just one -- see
+    # ContributionService.list_purses_for_user's docstring.
+    rows = await contribution_service.list_purses_for_user(current_user.id)
     return success_response(
         [
             {
@@ -127,7 +155,8 @@ async def list_my_purses(
                 "amount": str(purse.amount),
                 "deadline": purse.deadline.isoformat(),
                 "contribution_status": contribution.status.value,
+                "group": {"id": str(group.id), "name": group.name, "short_code": group.short_code},
             }
-            for contribution, purse in rows
+            for contribution, purse, group in rows
         ]
     )

@@ -135,6 +135,8 @@ async def test_resend_verification_already_verified_is_a_silent_noop(client):
 
 async def test_login_success_and_invalid_credentials(client):
     await _register(client, email="loginme@example.com", password="correcthorse123")
+    verify_token = await find_redis_token("verify_email")
+    await client.post("/auth/verify-email", json={"email": "loginme@example.com", "token": verify_token})
 
     ok = await client.post(
         "/auth/login", json={"email": "loginme@example.com", "password": "correcthorse123"}
@@ -153,8 +155,50 @@ async def test_login_success_and_invalid_credentials(client):
     assert bad.json()["error"]["code"] == "invalid_credentials"
 
 
+async def test_unverified_account_cannot_log_in_group_admin_or_member(client):
+    # Applies uniformly to both roles -- verification isn't role-specific.
+    await _register(client, email="unverified-admin@example.com", role="group_admin", password="password123")
+    admin_login = await client.post(
+        "/auth/login", json={"email": "unverified-admin@example.com", "password": "password123"}
+    )
+    assert admin_login.status_code == 403
+    body = admin_login.json()
+    assert body["success"] is False
+    assert body["data"] is None
+    assert body["error"]["code"] == "email_not_verified"
+
+    # Consume the admin's own token before registering the member below --
+    # otherwise two unconsumed tokens coexist in redis and find_redis_token
+    # (keys[0]) can't reliably tell them apart (see test_invites_members.py
+    # for the same reasoning).
+    admin_verify_token = await find_redis_token("verify_email")
+    await client.post(
+        "/auth/verify-email", json={"email": "unverified-admin@example.com", "token": admin_verify_token}
+    )
+
+    await _register(client, email="unverified-member@example.com", role="member", password="password123")
+    member_login = await client.post(
+        "/auth/login", json={"email": "unverified-member@example.com", "password": "password123"}
+    )
+    assert member_login.status_code == 403
+    assert member_login.json()["error"]["code"] == "email_not_verified"
+
+    # Verifying flips it -- no tokens before, tokens after, same account.
+    verify_token = await find_redis_token("verify_email")
+    await client.post(
+        "/auth/verify-email", json={"email": "unverified-member@example.com", "token": verify_token}
+    )
+    now_verified = await client.post(
+        "/auth/login", json={"email": "unverified-member@example.com", "password": "password123"}
+    )
+    assert now_verified.status_code == 200
+    assert "access_token" in now_verified.json()["data"]
+
+
 async def test_refresh_token_rotation_and_reuse_detection(client):
     await _register(client, email="rotator@example.com", password="correcthorse123")
+    verify_token = await find_redis_token("verify_email")
+    await client.post("/auth/verify-email", json={"email": "rotator@example.com", "token": verify_token})
     login = await client.post(
         "/auth/login", json={"email": "rotator@example.com", "password": "correcthorse123"}
     )
@@ -181,6 +225,8 @@ async def test_refresh_token_rotation_and_reuse_detection(client):
 
 async def test_forgot_and_reset_password(client):
     await _register(client, email="resetme@example.com", password="oldpassword123")
+    verify_token = await find_redis_token("verify_email")
+    await client.post("/auth/verify-email", json={"email": "resetme@example.com", "token": verify_token})
 
     forgot = await client.post("/auth/forgot-password", json={"email": "resetme@example.com"})
     assert forgot.status_code == 200
@@ -211,6 +257,8 @@ async def test_forgot_password_unknown_email_still_returns_200(client):
 
 async def test_logout_revokes_refresh_token_and_blacklists_access_token(client):
     await _register(client, email="logout-test@example.com", role="group_admin", password="password123")
+    verify_token = await find_redis_token("verify_email")
+    await client.post("/auth/verify-email", json={"email": "logout-test@example.com", "token": verify_token})
     login = await client.post(
         "/auth/login", json={"email": "logout-test@example.com", "password": "password123"}
     )
@@ -218,9 +266,10 @@ async def test_logout_revokes_refresh_token_and_blacklists_access_token(client):
     refresh_token = login.json()["data"]["refresh_token"]
 
     # Valid token, just not onboarded yet -- proves the token is accepted
-    # by the auth layer before logout.
-    before = await client.get("/group-admins/me", headers={"Authorization": f"Bearer {access_token}"})
-    assert before.status_code == 404
+    # by the auth layer before logout (empty group list, not a 401).
+    before = await client.get("/group-admins/me/groups", headers={"Authorization": f"Bearer {access_token}"})
+    assert before.status_code == 200
+    assert before.json()["data"] == []
 
     logout = await client.post(
         "/auth/logout",
@@ -230,7 +279,7 @@ async def test_logout_revokes_refresh_token_and_blacklists_access_token(client):
     assert logout.status_code == 200
     assert logout.json()["data"]["logged_out"] is True
 
-    after = await client.get("/group-admins/me", headers={"Authorization": f"Bearer {access_token}"})
+    after = await client.get("/group-admins/me/groups", headers={"Authorization": f"Bearer {access_token}"})
     assert after.status_code == 401
 
     refresh_after_logout = await client.post("/auth/refresh-token", json={"refresh_token": refresh_token})

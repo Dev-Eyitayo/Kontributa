@@ -8,7 +8,7 @@ from sqlalchemy import select
 
 from app.core.config import settings
 from app.modules.contributions.models import Contribution
-from tests.conftest import _state, create_org_and_group, find_redis_token
+from tests.conftest import _state, create_org_and_group, find_redis_token, onboard_group_admin
 
 
 async def _register_and_login_group_admin(client, email="rep@example.com"):
@@ -44,17 +44,13 @@ def _future_deadline(days=7) -> str:
 
 
 async def _setup_purse_with_member(client, db_session, amount="2500.00"):
-    org, group = await create_org_and_group(db_session)
+    org, _existing_group = await create_org_and_group(db_session)
     admin_token = await _register_and_login_group_admin(client)
     admin_headers = {"Authorization": f"Bearer {admin_token}"}
-    await client.post(
-        "/group-admins/onboard",
-        json={"organization_id": str(org.id), "group_id": str(group.id)},
-        headers=admin_headers,
-    )
+    group = await onboard_group_admin(client, db_session, org, admin_headers)
 
     invite = await client.post(
-        "/group-admins/invite-links", json={"expires_in_days": 7}, headers=admin_headers
+        f"/group-admins/invite-links?group_id={group.id}", json={"expires_in_days": 7}, headers=admin_headers
     )
     token = invite.json()["data"]["token"]
     member_token = await _register_and_login_member(client, token, "ada@example.com")
@@ -62,7 +58,13 @@ async def _setup_purse_with_member(client, db_session, amount="2500.00"):
 
     create = await client.post(
         "/purses",
-        json={"title": "Project Defense Fee", "amount": amount, "deadline": _future_deadline(), "enroll_mode": "snapshot"},
+        json={
+            "group_id": str(group.id),
+            "title": "Project Defense Fee",
+            "amount": amount,
+            "deadline": _future_deadline(),
+            "enroll_mode": "snapshot",
+        },
         headers=admin_headers,
     )
     purse_id = create.json()["data"]["id"]
@@ -329,7 +331,13 @@ async def test_member_cannot_view_another_members_contribution(client, db_sessio
 
     other_member_token = await _register_and_login_member(
         client,
-        (await client.post("/group-admins/invite-links", json={"expires_in_days": 7}, headers=ctx["admin_headers"])).json()["data"]["token"],
+        (
+            await client.post(
+                f"/group-admins/invite-links?group_id={ctx['group'].id}",
+                json={"expires_in_days": 7},
+                headers=ctx["admin_headers"],
+            )
+        ).json()["data"]["token"],
         "other@example.com",
         first_name="Other",
         last_name="Member",
@@ -343,16 +351,12 @@ async def test_member_cannot_view_another_members_contribution(client, db_sessio
 async def test_rep_cannot_view_contribution_outside_own_purses(client, db_session):
     ctx = await _setup_purse_with_member(client, db_session)
 
-    other_org, other_group = await create_org_and_group(
+    other_org, _existing_other_group = await create_org_and_group(
         db_session, org_name="Other Uni", org_short_code="OU4", group_name="Other Dept", group_short_code="OD4"
     )
     other_admin_token = await _register_and_login_group_admin(client, email="other-rep@example.com")
     other_headers = {"Authorization": f"Bearer {other_admin_token}"}
-    await client.post(
-        "/group-admins/onboard",
-        json={"organization_id": str(other_org.id), "group_id": str(other_group.id)},
-        headers=other_headers,
-    )
+    await onboard_group_admin(client, db_session, other_org, other_headers, group_name="Other Group")
 
     resp = await client.get(f"/contributions/{ctx['contribution_id']}", headers=other_headers)
     assert resp.status_code == 403

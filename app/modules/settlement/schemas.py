@@ -1,8 +1,10 @@
 from datetime import datetime
-from typing import Optional
+from typing import Literal, Optional
 from uuid import UUID
 
 from pydantic import BaseModel
+
+SettlementModeLiteral = Literal["direct", "custodian"]
 
 
 class SettlementLookupRequest(BaseModel):
@@ -28,3 +30,18 @@ class SettlementAccountResponse(BaseModel):
     account_number: str
     account_name_verified: bool
     verified_at: Optional[datetime] = None
+    settlement_mode: SettlementModeLiteral
+    # Only present in "direct" mode.
+    direct_sub_account_code: Optional[str] = None
+
+
+class SwitchSettlementModeRequest(BaseModel):
+    new_mode: SettlementModeLiteral
+
+
+class SwitchSettlementModeResponse(BaseModel):
+    settlement_mode: SettlementModeLiteral
+
+
+class SettlementOptionsResponse(BaseModel):
+    custodian_mode_enabled: bool

@@ -29,6 +29,18 @@ class GroupBrief(BaseModel):
     short_code: str
 
 
+class MyMemberGroupItem(BaseModel):
+    id: UUID
+    name: str
+    short_code: str
+    organization_id: UUID
+    organization_name: str
+    cohort: Optional[str] = None
+    # Per (user, group), never global -- a member in two groups can have
+    # two different id numbers on file.
+    member_id_number: Optional[str] = None
+
+
 class MemberMeResponse(BaseModel):
     id: UUID
     first_name: str
@@ -59,3 +71,7 @@ class MemberPurseListItem(BaseModel):
     amount: str
     deadline: str
     contribution_status: str
+    # Which group this purse belongs to -- a member in more than one group
+    # otherwise has no way to tell purses from different groups apart in a
+    # single combined list.
+    group: GroupBrief

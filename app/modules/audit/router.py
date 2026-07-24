@@ -20,8 +20,6 @@ from app.modules.audit.schemas import (
 )
 from app.modules.audit.service import AuditService
 from app.modules.auth.models import User
-from app.modules.group_admins.service import GroupAdminService
-from app.modules.members.service import MemberService
 
 router = APIRouter(prefix="/audit", tags=["audit"])
 
@@ -30,20 +28,22 @@ def get_audit_service(db: AsyncSession = Depends(get_db)) -> AuditService:
     return AuditService(db)
 
 
-def _entry_out(entry: AuditLog) -> dict:
+def _entry_out(entry: AuditLog, actor_names: dict, entity_labels: dict) -> dict:
     return {
         "entity_type": entry.entity_type,
         "entity_id": str(entry.entity_id),
+        "entity_label": entity_labels.get(entry.entity_id),
         "action": entry.action,
         "actor_type": entry.actor_type.value,
         "actor_id": str(entry.actor_id) if entry.actor_id else None,
+        "actor_name": AuditService.actor_label(entry, actor_names),
         "before_state": entry.before_state,
         "after_state": entry.after_state,
         "created_at": entry.created_at.isoformat(),
     }
 
 
-def _contribution_history_out(entry: AuditLog) -> dict:
+def _contribution_history_out(entry: AuditLog, actor_names: dict) -> dict:
     before = entry.before_state or {}
     after = entry.after_state or {}
     return {
@@ -51,12 +51,13 @@ def _contribution_history_out(entry: AuditLog) -> dict:
         "to_status": after.get("status"),
         "actor_type": entry.actor_type.value,
         "actor_id": str(entry.actor_id) if entry.actor_id else None,
+        "actor_name": AuditService.actor_label(entry, actor_names),
         "note": after.get("note"),
         "created_at": entry.created_at.isoformat(),
     }
 
 
-def _payout_history_out(entry: AuditLog) -> dict:
+def _payout_history_out(entry: AuditLog, actor_names: dict) -> dict:
     before = entry.before_state or {}
     after = entry.after_state or {}
     return {
@@ -64,6 +65,7 @@ def _payout_history_out(entry: AuditLog) -> dict:
         "to_status": after.get("status"),
         "actor_type": entry.actor_type.value,
         "actor_id": str(entry.actor_id) if entry.actor_id else None,
+        "actor_name": AuditService.actor_label(entry, actor_names),
         "created_at": entry.created_at.isoformat(),
     }
 
@@ -72,17 +74,15 @@ def _payout_history_out(entry: AuditLog) -> dict:
 async def get_contribution_audit(
     contribution_id: UUID,
     current_user: CurrentUser = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
     service: AuditService = Depends(get_audit_service),
 ) -> JSONResponse:
     if current_user.role == "group_admin":
-        admin = await GroupAdminService(db).get_by_user_id(current_user.id)
-        entries = await service.contribution_history_for_admin(contribution_id, admin)
+        entries = await service.contribution_history_for_admin(contribution_id, current_user.id)
     else:
-        member = await MemberService(db).get_by_user_id(current_user.id)
-        entries = await service.contribution_history_for_member(contribution_id, member)
+        entries = await service.contribution_history_for_member(contribution_id, current_user.id)
 
-    return success_response([_contribution_history_out(e) for e in entries])
+    actor_names = await service.resolve_actor_names(entries)
+    return success_response([_contribution_history_out(e, actor_names) for e in entries])
 
 
 @router.get("/purses/{purse_id}", response_model=StandardResponse[list[PurseAuditEntry]])
@@ -95,9 +95,10 @@ async def get_purse_audit(
     if current_user.role != "group_admin":
         raise ForbiddenError("only a group admin can view a purse's audit history")
 
-    admin = await GroupAdminService(db).get_by_user_id(current_user.id)
-    entries = await service.purse_history_for_admin(purse_id, admin)
-    return success_response([_entry_out(e) for e in entries])
+    entries = await service.purse_history_for_admin(purse_id, current_user.id)
+    actor_names = await service.resolve_actor_names(entries)
+    entity_labels = await service.resolve_entity_labels(entries)
+    return success_response([_entry_out(e, actor_names, entity_labels) for e in entries])
 
 
 @router.get("/payouts/{payout_id}", response_model=StandardResponse[list[PayoutAuditEntry]])
@@ -115,12 +116,12 @@ async def get_payout_audit(
     if user_row is not None and user_row.is_platform_admin:
         entries = await service.payout_history_for_platform_admin(payout_id)
     elif current_user.role == "group_admin":
-        admin = await GroupAdminService(db).get_by_user_id(current_user.id)
-        entries = await service.payout_history_for_admin(payout_id, admin)
+        entries = await service.payout_history_for_admin(payout_id, current_user.id)
     else:
         raise ForbiddenError("only a group admin or platform admin can view payout audit history")
 
-    return success_response([_payout_history_out(e) for e in entries])
+    actor_names = await service.resolve_actor_names(entries)
+    return success_response([_payout_history_out(e, actor_names) for e in entries])
 
 
 @router.get("/groups/{group_id}", response_model=StandardResponse[Paginated[GroupAuditFeedEntry]])

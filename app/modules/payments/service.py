@@ -13,6 +13,7 @@ from app.core.exceptions import AppException
 from app.modules.payments.schemas import (
     MonnifyAccountName,
     MonnifyInvoice,
+    MonnifySubAccount,
     MonnifyTransactionStatus,
     MonnifyTransferResult,
 )
@@ -123,21 +124,29 @@ class MonnifyClient:
         customer_email: str,
         description: str,
         expires_at: datetime,
+        income_split_config: Optional[list[dict]] = None,
     ) -> MonnifyInvoice:
-        body = await self._request(
-            "POST",
-            "/api/v1/invoice/create",
-            {
-                "invoiceReference": invoice_reference,
-                "amount": float(amount),
-                "invoiceDescription": description,
-                "currencyCode": "NGN",
-                "contractCode": self._contract_code,
-                "customerEmail": customer_email,
-                "customerName": customer_name,
-                "expiryDate": expires_at.astimezone(_MONNIFY_TZ).strftime("%Y-%m-%d %H:%M:%S"),
-            },
-        )
+        body_payload = {
+            "invoiceReference": invoice_reference,
+            "amount": float(amount),
+            "invoiceDescription": description,
+            "currencyCode": "NGN",
+            "contractCode": self._contract_code,
+            "customerEmail": customer_email,
+            "customerName": customer_name,
+            "expiryDate": expires_at.astimezone(_MONNIFY_TZ).strftime("%Y-%m-%d %H:%M:%S"),
+        }
+        # Direct-mode groups only -- routes their share of this specific
+        # invoice straight to their own Monnify sub-account (see
+        # create_sub_account below) rather than Kontributa's main wallet.
+        # Contribution state transitions (pending/paid/expired/flagged) are
+        # detected identically either way, off our own invoiceReference --
+        # this only changes where the money settles, not how payment
+        # confirmation works.
+        if income_split_config:
+            body_payload["incomeSplitConfig"] = income_split_config
+
+        body = await self._request("POST", "/api/v1/invoice/create", body_payload)
         return MonnifyInvoice(
             invoice_reference=body["invoiceReference"],
             account_number=body["accountNumber"],
@@ -196,6 +205,47 @@ class MonnifyClient:
             account_number=body.get("accountNumber", account_number),
             bank_code=body.get("bankCode", bank_code),
             account_name=body.get("accountName", ""),
+        )
+
+    async def create_sub_account(
+        self, bank_code: str, account_number: str, email: str, split_percentage: Decimal
+    ) -> MonnifySubAccount:
+        """Creates a Monnify sub-account for Direct-mode settlement -- a
+        purse's split invoice (see create_invoice's income_split_config)
+        routes the group's share straight here instead of Kontributa's main
+        wallet. The account-name lookup (verify_account_name above) is
+        reused as-is beforehand; this call only runs after that's already
+        confirmed the account holder's name.
+
+        Per Monnify's Create Sub-Account API this is a batch endpoint (an
+        array of sub-account specs) even for a single one -- still
+        best-effort like verify_account_name and create_invoice, worth one
+        real sandbox call to confirm the exact response shape before this
+        is offered as a live option (see known-limitations.md: Direct mode
+        also depends on Monnify activating sub-account access on the
+        account, an operational step outside this codebase).
+        """
+        body = await self._request(
+            "POST",
+            "/api/v1/sub-accounts",
+            {
+                "subAccounts": [
+                    {
+                        "currencyCode": "NGN",
+                        "bankCode": bank_code,
+                        "accountNumber": account_number,
+                        "email": email,
+                        "defaultSplitPercentage": float(split_percentage),
+                    }
+                ]
+            },
+        )
+        accounts = body if isinstance(body, list) else body.get("subAccounts", [])
+        first = accounts[0] if accounts else {}
+        return MonnifySubAccount(
+            sub_account_code=first.get("subAccountCode", ""),
+            bank_code=first.get("bankCode", bank_code),
+            account_number=first.get("accountNumber", account_number),
         )
 
     async def initiate_single_transfer(

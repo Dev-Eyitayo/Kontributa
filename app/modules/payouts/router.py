@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.auth import CurrentUser, get_current_admin_user, get_current_group_admin_user, get_current_user
 from app.core.db import get_db
-from app.core.exceptions import ForbiddenError
+from app.core.exceptions import BusinessRuleError, ForbiddenError
 from app.core.response import StandardResponse, success_response
 from app.modules.auth.models import User
 from app.modules.group_admins.service import GroupAdminService
@@ -55,7 +55,7 @@ async def create_payout(
     service: PayoutService = Depends(get_payout_service),
     admin_service: GroupAdminService = Depends(get_group_admin_service),
 ) -> JSONResponse:
-    admin = await admin_service.get_by_user_id(current_user.id)
+    admin = await admin_service.get_admin_for_group(current_user.id, payload.group_id)
     payout = await service.create(admin, payload)
     return success_response(
         {"id": str(payout.id), "status": payout.status.value, "amount": str(payout.amount)}, status_code=201
@@ -64,6 +64,7 @@ async def create_payout(
 
 @router.get("", response_model=StandardResponse[list[PayoutListItem]])
 async def list_payouts(
+    group_id: Optional[UUID] = Query(default=None),
     status: Optional[str] = Query(default=None),
     current_user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -79,8 +80,12 @@ async def list_payouts(
     if user_row is not None and user_row.is_platform_admin:
         payouts = await service.list_all(status)
     elif current_user.role == "group_admin":
-        admin = await GroupAdminService(db).get_by_user_id(current_user.id)
-        payouts = await service.list_for_group(admin.group_id, status)
+        if group_id is None:
+            raise BusinessRuleError(
+                "group_id is required -- an admin may manage more than one group", code="group_id_required"
+            )
+        await GroupAdminService(db).get_admin_for_group(current_user.id, group_id)
+        payouts = await service.list_for_group(group_id, status)
     else:
         raise ForbiddenError("only a group admin or platform admin can list payouts")
 
@@ -100,9 +105,7 @@ async def get_payout(
     if user_row is not None and user_row.is_platform_admin:
         pass
     elif current_user.role == "group_admin":
-        admin = await GroupAdminService(db).get_by_user_id(current_user.id)
-        if payout.group_id != admin.group_id:
-            raise ForbiddenError("cannot view another group's payout")
+        await GroupAdminService(db).get_admin_for_group(current_user.id, payout.group_id)
     else:
         raise ForbiddenError("only a group admin or platform admin can view a payout")
 

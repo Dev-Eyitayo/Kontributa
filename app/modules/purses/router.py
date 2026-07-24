@@ -14,7 +14,7 @@ from app.core.auth import (
     require_verified_email,
 )
 from app.core.db import get_db
-from app.core.exceptions import ForbiddenError
+from app.core.exceptions import BusinessRuleError, ForbiddenError
 from app.core.idempotency import IdempotencyStore, fingerprint, get_idempotency_key, get_idempotency_store
 from app.core.pagination import DEFAULT_LIMIT, MAX_LIMIT, Paginated
 from app.core.response import StandardResponse, success_response
@@ -29,6 +29,7 @@ from app.modules.purses.schemas import (
     AvailableBalanceOut,
     ContributionListItem,
     CreatePurseRequest,
+    MemberVisibleContributionItem,
     PurseDetailAdminOut,
     PurseDetailMemberOut,
     PurseListItemAdminOut,
@@ -40,6 +41,8 @@ from app.modules.purses.schemas import (
     UpdatePurseRequest,
 )
 from app.modules.purses.service import PurseService
+from app.modules.settlement.models import SettlementMode
+from app.modules.settlement.service import SettlementService
 
 router = APIRouter(prefix="/purses", tags=["purses"])
 
@@ -100,7 +103,7 @@ async def create_purse(
     admin_service: GroupAdminService = Depends(get_group_admin_service),
     idem_store: IdempotencyStore = Depends(get_idempotency_store),
 ) -> JSONResponse:
-    admin = await admin_service.get_by_user_id(current_user.id)
+    admin = await admin_service.get_admin_for_group(current_user.id, payload.group_id)
 
     request_fingerprint = fingerprint(payload.model_dump(mode="json"))
     if idempotency_key is not None:
@@ -134,6 +137,7 @@ async def create_purse(
     "", response_model=StandardResponse[Union[Paginated[PurseListItemAdminOut], Paginated[PurseListItemMemberOut]]]
 )
 async def list_purses(
+    group_id: Optional[UUID] = Query(default=None),
     status: Optional[str] = Query(default=None),
     limit: int = Query(default=DEFAULT_LIMIT, ge=1, le=MAX_LIMIT),
     offset: int = Query(default=0, ge=0),
@@ -141,7 +145,11 @@ async def list_purses(
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
     if current_user.role == "group_admin":
-        admin = await GroupAdminService(db).get_by_user_id(current_user.id)
+        if group_id is None:
+            raise BusinessRuleError(
+                "group_id is required -- an admin may manage more than one group", code="group_id_required"
+            )
+        admin = await GroupAdminService(db).get_admin_for_group(current_user.id, group_id)
         purses, total = await PurseService(db).list_for_admin(admin, status, limit, offset)
         purse_ids = [p.id for p in purses]
         contribution_service = ContributionService(db)
@@ -190,9 +198,7 @@ async def get_purse(
     purse = await PurseService(db).get_detail(purse_id)
 
     if current_user.role == "group_admin":
-        admin = await GroupAdminService(db).get_by_user_id(current_user.id)
-        if purse.group_id != admin.group_id:
-            raise ForbiddenError("cannot view a purse outside your group")
+        await GroupAdminService(db).get_admin_for_group(current_user.id, purse.group_id)
         counts = await ContributionService(db).counts_for_purses([purse.id])
         paid_count, total_count = counts.get(purse.id, (0, 0))
         return success_response(
@@ -204,8 +210,13 @@ async def get_purse(
             }
         )
 
-    member = await MemberService(db).get_by_user_id(current_user.id)
-    contribution = await ContributionService(db).get_for_member(purse.id, member.id)
+    # Resolved against *this* purse's own group (not get_by_user_id's
+    # arbitrary pick among a multi-group member's several Member rows) --
+    # otherwise a member viewing a purse from their second group could be
+    # wrongly rejected if a different group's membership happened to be
+    # picked instead.
+    member = await MemberService(db).get_by_user_and_group(current_user.id, purse.group_id)
+    contribution = await ContributionService(db).get_for_member(purse.id, member.id) if member else None
     if contribution is None:
         raise ForbiddenError("not eligible for this purse")
     return success_response(
@@ -225,7 +236,8 @@ async def update_purse(
     purse_service: PurseService = Depends(get_purse_service),
     admin_service: GroupAdminService = Depends(get_group_admin_service),
 ) -> JSONResponse:
-    admin = await admin_service.get_by_user_id(current_user.id)
+    target = await purse_service.get_by_id(purse_id)
+    admin = await admin_service.get_admin_for_group(current_user.id, target.group_id)
     purse = await purse_service.update(admin, purse_id, payload)
     return success_response({"id": str(purse.id), "amount": str(purse.amount), "deadline": purse.deadline.isoformat()})
 
@@ -237,7 +249,8 @@ async def close_purse(
     purse_service: PurseService = Depends(get_purse_service),
     admin_service: GroupAdminService = Depends(get_group_admin_service),
 ) -> JSONResponse:
-    admin = await admin_service.get_by_user_id(current_user.id)
+    target = await purse_service.get_by_id(purse_id)
+    admin = await admin_service.get_admin_for_group(current_user.id, target.group_id)
     purse = await purse_service.close(admin, purse_id)
     return success_response({"id": str(purse.id), "status": purse.status.value})
 
@@ -266,9 +279,7 @@ async def list_contributions(
     if user_row is not None and user_row.is_platform_admin:
         pass
     else:
-        admin = await admin_service.get_by_user_id(current_user.id)
-        if purse.group_id != admin.group_id:
-            raise ForbiddenError("cannot view contributions for a purse outside your group")
+        await admin_service.get_admin_for_group(current_user.id, purse.group_id)
 
     rows, total = await contribution_service.list_for_purse(purse_id, status, limit, offset)
     return success_response(
@@ -292,6 +303,41 @@ async def list_contributions(
     )
 
 
+@router.get(
+    "/{purse_id}/member-contributions", response_model=StandardResponse[Paginated[MemberVisibleContributionItem]]
+)
+async def list_contributions_for_member(
+    purse_id: UUID,
+    limit: int = Query(default=DEFAULT_LIMIT, ge=1, le=MAX_LIMIT),
+    offset: int = Query(default=0, ge=0),
+    current_user: CurrentUser = Depends(get_current_member_user),
+    purse_service: PurseService = Depends(get_purse_service),
+    member_service: MemberService = Depends(get_member_service),
+    contribution_service: ContributionService = Depends(get_contribution_service),
+) -> JSONResponse:
+    """Full transparency, minus admin-only resolution details -- any member
+    of this purse's group can see who's paid on it, not just their own
+    status. Scoped to group membership (not enrollment in this specific
+    purse) -- 403 for anyone outside the group entirely."""
+    purse = await purse_service.get_by_id(purse_id)
+    member = await member_service.get_by_user_and_group(current_user.id, purse.group_id)
+    if member is None:
+        raise ForbiddenError("only a member of this purse's group can view its contribution statuses")
+
+    rows, total = await contribution_service.list_for_purse(purse_id, None, limit, offset)
+    return success_response(
+        {
+            "items": [
+                {"name": f"{user.first_name} {user.last_name}", "status": contribution.status.value}
+                for contribution, _member, user in rows
+            ],
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+        }
+    )
+
+
 @router.post("/{purse_id}/contributions", status_code=201, response_model=StandardResponse[AddMemberToPurseResponse])
 async def add_member_to_purse(
     purse_id: UUID,
@@ -300,7 +346,8 @@ async def add_member_to_purse(
     purse_service: PurseService = Depends(get_purse_service),
     admin_service: GroupAdminService = Depends(get_group_admin_service),
 ) -> JSONResponse:
-    admin = await admin_service.get_by_user_id(current_user.id)
+    target = await purse_service.get_by_id(purse_id)
+    admin = await admin_service.get_admin_for_group(current_user.id, target.group_id)
     contribution = await purse_service.add_member(admin, purse_id, payload.member_id)
     return success_response(
         {
@@ -322,10 +369,8 @@ async def get_summary(
     admin_service: GroupAdminService = Depends(get_group_admin_service),
     contribution_service: ContributionService = Depends(get_contribution_service),
 ) -> JSONResponse:
-    admin = await admin_service.get_by_user_id(current_user.id)
     purse = await purse_service.get_by_id(purse_id)
-    if purse.group_id != admin.group_id:
-        raise ForbiddenError("cannot view summary for a purse outside your group")
+    await admin_service.get_admin_for_group(current_user.id, purse.group_id)
 
     summary = await contribution_service.summary_for_purse(purse_id)
     return success_response({**summary, "total_collected": str(summary["total_collected"])})
@@ -339,15 +384,31 @@ async def get_available_balance(
     purse_service: PurseService = Depends(get_purse_service),
     admin_service: GroupAdminService = Depends(get_group_admin_service),
 ) -> JSONResponse:
-    admin = await admin_service.get_by_user_id(current_user.id)
     purse = await purse_service.get_by_id(purse_id)
-    if purse.group_id != admin.group_id:
-        raise ForbiddenError("cannot view available balance for a purse outside your group")
+    await admin_service.get_admin_for_group(current_user.id, purse.group_id)
+
+    settlement = await SettlementService(db).get(purse.group_id)
+    if settlement is not None and settlement.settlement_mode == SettlementMode.DIRECT:
+        # No held-balance concept applies -- payments already went straight
+        # to the group's own account. A bare "0" here would look
+        # indistinguishable from a custodian-mode purse that simply hasn't
+        # collected anything yet, which is exactly the confusion this
+        # distinct shape avoids.
+        return success_response(
+            {
+                "purse_id": str(purse_id),
+                "settlement_mode": "direct",
+                "collected_total": None,
+                "paid_out_total": None,
+                "available_balance": None,
+            }
+        )
 
     balance = await PayoutService(db).get_available_balance(purse_id)
     return success_response(
         {
             "purse_id": str(balance["purse_id"]),
+            "settlement_mode": "custodian",
             "collected_total": str(balance["collected_total"]),
             "paid_out_total": str(balance["paid_out_total"]),
             "available_balance": str(balance["available_balance"]),

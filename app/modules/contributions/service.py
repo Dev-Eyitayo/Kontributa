@@ -15,8 +15,10 @@ from app.modules.contributions.models import ActorType, Contribution, Contributi
 from app.modules.group_admins.models import GroupAdmin
 from app.modules.members.models import Member
 from app.modules.notifications.service import NotificationService
+from app.modules.organizations.models import Group
 from app.modules.payments.service import MonnifyClient
 from app.modules.purses.models import EnrollMode, Purse, PurseStatus
+from app.modules.settlement.models import SettlementAccount, SettlementMode
 
 _AUDIT_ACTOR_MAP = {
     ActorType.WEBHOOK: AuditActorType.WEBHOOK,
@@ -209,6 +211,24 @@ class ContributionService:
         result = await self.db.execute(stmt)
         return [(row[0], row[1]) for row in result.all()]
 
+    async def list_purses_for_user(self, user_id: UUID) -> list[tuple[Contribution, Purse, Group]]:
+        """Every purse across *every* group this user is a Member of --
+        list_member_purses above is scoped to one Member row, which used to
+        be the only kind a user could have. Joins through Member (rather
+        than taking a member_id) specifically so a member in more than one
+        group sees every group's purses in one response, each still
+        resolvable back to which group it came from via the returned Group."""
+        stmt = (
+            select(Contribution, Purse, Group)
+            .join(Member, Contribution.member_id == Member.id)
+            .join(Purse, Contribution.purse_id == Purse.id)
+            .join(Group, Purse.group_id == Group.id)
+            .where(Member.user_id == user_id)
+            .order_by(Purse.deadline.asc())
+        )
+        result = await self.db.execute(stmt)
+        return [(row[0], row[1], row[2]) for row in result.all()]
+
     async def get_by_id(self, contribution_id: UUID) -> Contribution:
         contribution = await self.db.get(Contribution, contribution_id)
         if contribution is None:
@@ -341,6 +361,25 @@ class ContributionService:
         expires_at = now + timedelta(minutes=settings.MONNIFY_INVOICE_EXPIRY_MINUTES)
         invoice_reference = f"{contribution.id}-{uuid4().hex[:8]}"
 
+        # Direct-mode groups route their share straight to their own
+        # Monnify sub-account via an income split on this specific invoice;
+        # custodian-mode groups (or a direct-mode group whose sub-account
+        # setup is somehow missing) get exactly today's behavior. Either
+        # way, payment confirmation below is still detected off our own
+        # invoice_reference -- this only changes where the money settles.
+        income_split_config = None
+        settlement = (
+            await self.db.execute(select(SettlementAccount).where(SettlementAccount.group_id == purse.group_id))
+        ).scalar_one_or_none()
+        if settlement and settlement.settlement_mode == SettlementMode.DIRECT and settlement.direct_sub_account_code:
+            income_split_config = [
+                {
+                    "subAccountCode": settlement.direct_sub_account_code,
+                    "feePercentage": 100,
+                    "feeBearer": False,
+                }
+            ]
+
         invoice = await monnify.create_invoice(
             invoice_reference=invoice_reference,
             amount=outstanding,
@@ -348,6 +387,7 @@ class ContributionService:
             customer_email=member_user.email,
             description=purse.title,
             expires_at=expires_at,
+            income_split_config=income_split_config,
         )
 
         from_status = contribution.status

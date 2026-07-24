@@ -19,7 +19,7 @@ from app.modules.payments.service import MonnifyClient, MonnifyError
 from app.modules.payouts.models import Payout, PayoutActorType, PayoutAllocation, PayoutEvent, PayoutStatus
 from app.modules.payouts.schemas import CreatePayoutRequest
 from app.modules.purses.models import Purse
-from app.modules.settlement.models import SettlementAccount
+from app.modules.settlement.models import SettlementAccount, SettlementMode
 
 logger = logging.getLogger("kontributa.payouts")
 
@@ -120,6 +120,12 @@ class PayoutService:
             "available_balance": collected_total - outstanding - allocated_from_sweeps,
         }
 
+    async def available_balance_for_group(self, group_id: UUID) -> Decimal:
+        """Public wrapper -- used outside this service by
+        SettlementService.switch_mode to block a custodian -> direct switch
+        while custodian funds are still sitting uncollected."""
+        return await self._available_balance_for_group(group_id)
+
     async def _available_balance_for_group(self, group_id: UUID) -> Decimal:
         purse_ids_result = await self.db.execute(select(Purse.id).where(Purse.group_id == group_id))
         purse_ids = [row[0] for row in purse_ids_result.all()]
@@ -191,6 +197,18 @@ class PayoutService:
     async def create(self, admin: GroupAdmin, payload: CreatePayoutRequest) -> Payout:
         if payload.group_id != admin.group_id:
             raise ForbiddenError("cannot request a payout for another group")
+
+        settlement = (
+            await self.db.execute(select(SettlementAccount).where(SettlementAccount.group_id == admin.group_id))
+        ).scalar_one_or_none()
+        if settlement is not None and settlement.settlement_mode == SettlementMode.DIRECT:
+            # Direct-mode payments already went straight to the group's own
+            # account -- there is no held balance for Kontributa to pay out.
+            raise BusinessRuleError(
+                "this group is in direct settlement mode -- payments go straight to your own "
+                "account, so there is no held balance to request a payout from",
+                code="direct_mode_no_payout",
+            )
 
         if payload.purse_id is not None:
             # Row lock is the serialization point: a second concurrent request

@@ -54,11 +54,42 @@ class MemberService:
             raise NotFoundError("member profile not found")
         return member
 
+    async def get_by_id(self, member_id: UUID) -> Member:
+        member = await self.db.get(Member, member_id)
+        if member is None:
+            raise NotFoundError("member not found")
+        return member
+
     async def get_by_user_and_group(self, user_id: UUID, group_id: UUID) -> Optional[Member]:
         result = await self.db.execute(
             select(Member).where(Member.user_id == user_id, Member.group_id == group_id)
         )
         return result.scalar_one_or_none()
+
+    async def list_my_groups(self, user_id: UUID) -> list[dict]:
+        """Every group this user is a Member of, each with its *own*
+        member_id_number -- that field is per (user, group), never global,
+        so a member in two groups can have two different id numbers on
+        file, one per group."""
+        result = await self.db.execute(
+            select(Member, Group, Organization)
+            .join(Group, Member.group_id == Group.id)
+            .join(Organization, Group.organization_id == Organization.id)
+            .where(Member.user_id == user_id)
+            .order_by(Member.created_at)
+        )
+        return [
+            {
+                "id": group.id,
+                "name": group.name,
+                "short_code": group.short_code,
+                "organization_id": org.id,
+                "organization_name": org.name,
+                "cohort": member.cohort,
+                "member_id_number": member.member_id_number,
+            }
+            for member, group, org in result.all()
+        ]
 
     async def _validate_member_id_number(self, group_id: UUID, member_id_number: str | None) -> None:
         if member_id_number is None:
@@ -191,16 +222,32 @@ class MemberService:
 
         return member
 
-    async def get_me(self, user_id: UUID) -> tuple[Member, User, Group]:
-        member = await self.get_by_user_id(user_id)
+    async def get_me(self, user_id: UUID, group_id: Optional[UUID] = None) -> tuple[Member, User, Group]:
+        # An explicit group_id disambiguates which membership a multi-group
+        # member means; omitted, this falls back to get_by_user_id's
+        # most-recently-joined pick (unchanged behavior for a single-group
+        # member, or a caller that hasn't been updated to pass one yet).
+        if group_id is not None:
+            member = await self.get_by_user_and_group(user_id, group_id)
+            if member is None:
+                raise NotFoundError("member profile not found for this group")
+        else:
+            member = await self.get_by_user_id(user_id)
         user = await self.db.get(User, member.user_id)
         group = await self.db.get(Group, member.group_id)
         if user is None or group is None:
             raise NotFoundError("member profile not found")
         return member, user, group
 
-    async def update_me(self, user_id: UUID, payload: MemberUpdateRequest) -> tuple[Member, User]:
-        member = await self.get_by_user_id(user_id)
+    async def update_me(
+        self, user_id: UUID, payload: MemberUpdateRequest, group_id: Optional[UUID] = None
+    ) -> tuple[Member, User]:
+        if group_id is not None:
+            member = await self.get_by_user_and_group(user_id, group_id)
+            if member is None:
+                raise NotFoundError("member profile not found for this group")
+        else:
+            member = await self.get_by_user_id(user_id)
         user = await self.db.get(User, member.user_id)
         if user is None:
             raise NotFoundError("member profile not found")

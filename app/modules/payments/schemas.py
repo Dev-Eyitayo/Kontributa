@@ -33,3 +33,10 @@ class MonnifyAccountName:
 class MonnifyTransferResult:
     reference: str
     status: str
+
+
+@dataclass
+class MonnifySubAccount:
+    sub_account_code: str
+    bank_code: str
+    account_number: str

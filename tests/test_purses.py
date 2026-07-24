@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta, timezone
 
 from app.core.auth import create_access_token
-from tests.conftest import create_org_and_group, create_platform_admin, find_redis_token
+from tests.conftest import create_org_and_group, create_platform_admin, find_redis_token, onboard_group_admin
 
 
 async def _register_and_login_group_admin(client, email="rep@example.com"):
@@ -26,6 +26,8 @@ async def _register_and_login_member(client, token, email, first_name="Member", 
         f"/members/join/{token}",
         json={"email": email, "password": "password123", "first_name": first_name, "last_name": last_name},
     )
+    verify_token = await find_redis_token("verify_email")
+    await client.post("/auth/verify-email", json={"email": email, "token": verify_token})
     login = await client.post("/auth/login", json={"email": email, "password": "password123"})
     return login.json()["data"]["access_token"]
 
@@ -35,38 +37,43 @@ def _future_deadline(days=7) -> str:
 
 
 async def _setup_group_with_admin(client, db_session, cohort=None):
-    org, group = await create_org_and_group(db_session)
+    org, _existing_group = await create_org_and_group(db_session)
     admin_token = await _register_and_login_group_admin(client)
     headers = {"Authorization": f"Bearer {admin_token}"}
-    await client.post(
-        "/group-admins/onboard",
-        json={"organization_id": str(org.id), "group_id": str(group.id), "cohort": cohort},
-        headers=headers,
-    )
+    group = await onboard_group_admin(client, db_session, org, headers, cohort=cohort)
     return org, group, headers
 
 
-async def _invite_and_join_member(client, headers, cohort=None, email="member1@example.com"):
+async def _invite_and_join_member(client, headers, group_id, cohort=None, email="member1@example.com"):
     invite = await client.post(
-        "/group-admins/invite-links", json={"cohort": cohort, "expires_in_days": 7}, headers=headers
+        f"/group-admins/invite-links?group_id={group_id}",
+        json={"cohort": cohort, "expires_in_days": 7},
+        headers=headers,
     )
     token = invite.json()["data"]["token"]
     member_token = await _register_and_login_member(client, token, email)
     return {"Authorization": f"Bearer {member_token}"}
 
 
+def _purse_payload(group_id, **overrides):
+    payload = {
+        "group_id": str(group_id),
+        "title": "Fee",
+        "amount": "500.00",
+        "deadline": _future_deadline(),
+        "enroll_mode": "snapshot",
+    }
+    payload.update(overrides)
+    return payload
+
+
 async def test_create_purse_generates_pending_contributions_for_existing_members(client, db_session):
     org, group, headers = await _setup_group_with_admin(client, db_session)
-    member_headers = await _invite_and_join_member(client, headers)
+    member_headers = await _invite_and_join_member(client, headers, group.id)
 
     create = await client.post(
         "/purses",
-        json={
-            "title": "Project Defense Fee",
-            "amount": "2500.00",
-            "deadline": _future_deadline(),
-            "enroll_mode": "snapshot",
-        },
+        json=_purse_payload(group.id, title="Project Defense Fee", amount="2500.00"),
         headers=headers,
     )
     assert create.status_code == 201
@@ -97,26 +104,22 @@ async def test_create_purse_generates_pending_contributions_for_existing_members
     assert member_purses.status_code == 200
     assert member_purses.json()["data"][0]["purse_id"] == purse_id
     assert member_purses.json()["data"][0]["contribution_status"] == "pending"
+    assert member_purses.json()["data"][0]["group"]["id"] == str(group.id)
 
 
 async def test_snapshot_purse_does_not_include_latecomers(client, db_session):
     org, group, headers = await _setup_group_with_admin(client, db_session)
-    await _invite_and_join_member(client, headers, email="early@example.com")
+    await _invite_and_join_member(client, headers, group.id, email="early@example.com")
 
     create = await client.post(
         "/purses",
-        json={
-            "title": "Snapshot Fee",
-            "amount": "1000.00",
-            "deadline": _future_deadline(),
-            "enroll_mode": "snapshot",
-        },
+        json=_purse_payload(group.id, title="Snapshot Fee", amount="1000.00"),
         headers=headers,
     )
     purse_id = create.json()["data"]["id"]
 
     # A member joining after a snapshot purse was created must NOT get a contribution.
-    late_member_headers = await _invite_and_join_member(client, headers, email="late@example.com")
+    late_member_headers = await _invite_and_join_member(client, headers, group.id, email="late@example.com")
 
     summary = await client.get(f"/purses/{purse_id}/summary", headers=headers)
     assert summary.json()["data"]["pending_count"] == 1
@@ -127,21 +130,16 @@ async def test_snapshot_purse_does_not_include_latecomers(client, db_session):
 
 async def test_auto_enroll_purse_includes_future_joiners(client, db_session):
     org, group, headers = await _setup_group_with_admin(client, db_session)
-    await _invite_and_join_member(client, headers, email="early@example.com")
+    await _invite_and_join_member(client, headers, group.id, email="early@example.com")
 
     create = await client.post(
         "/purses",
-        json={
-            "title": "Auto Enroll Fee",
-            "amount": "1000.00",
-            "deadline": _future_deadline(),
-            "enroll_mode": "auto_enroll",
-        },
+        json=_purse_payload(group.id, title="Auto Enroll Fee", amount="1000.00", enroll_mode="auto_enroll"),
         headers=headers,
     )
     purse_id = create.json()["data"]["id"]
 
-    late_member_headers = await _invite_and_join_member(client, headers, email="late@example.com")
+    late_member_headers = await _invite_and_join_member(client, headers, group.id, email="late@example.com")
 
     summary = await client.get(f"/purses/{purse_id}/summary", headers=headers)
     assert summary.json()["data"]["pending_count"] == 2
@@ -154,12 +152,7 @@ async def test_enroll_mode_is_immutable(client, db_session):
     org, group, headers = await _setup_group_with_admin(client, db_session)
     create = await client.post(
         "/purses",
-        json={
-            "title": "Immutable Mode Fee",
-            "amount": "500.00",
-            "deadline": _future_deadline(),
-            "enroll_mode": "snapshot",
-        },
+        json=_purse_payload(group.id, title="Immutable Mode Fee"),
         headers=headers,
     )
     purse_id = create.json()["data"]["id"]
@@ -179,17 +172,12 @@ async def test_editing_amount_only_updates_pending_contributions(client, db_sess
     """The single easiest rule to get wrong: already-paid contributions must
     keep their original amount_expected when a purse's amount is edited."""
     org, group, headers = await _setup_group_with_admin(client, db_session)
-    member_headers_1 = await _invite_and_join_member(client, headers, email="payer@example.com")
-    member_headers_2 = await _invite_and_join_member(client, headers, email="nonpayer@example.com")
+    member_headers_1 = await _invite_and_join_member(client, headers, group.id, email="payer@example.com")
+    member_headers_2 = await _invite_and_join_member(client, headers, group.id, email="nonpayer@example.com")
 
     create = await client.post(
         "/purses",
-        json={
-            "title": "Amount Edit Fee",
-            "amount": "1000.00",
-            "deadline": _future_deadline(),
-            "enroll_mode": "snapshot",
-        },
+        json=_purse_payload(group.id, title="Amount Edit Fee", amount="1000.00"),
         headers=headers,
     )
     purse_id = create.json()["data"]["id"]
@@ -228,7 +216,7 @@ async def test_edit_purse_amount_must_be_positive(client, db_session):
     org, group, headers = await _setup_group_with_admin(client, db_session)
     create = await client.post(
         "/purses",
-        json={"title": "Validation Fee", "amount": "500.00", "deadline": _future_deadline(), "enroll_mode": "snapshot"},
+        json=_purse_payload(group.id, title="Validation Fee"),
         headers=headers,
     )
     purse_id = create.json()["data"]["id"]
@@ -241,7 +229,7 @@ async def test_cannot_edit_closed_purse(client, db_session):
     org, group, headers = await _setup_group_with_admin(client, db_session)
     create = await client.post(
         "/purses",
-        json={"title": "Closeable Fee", "amount": "500.00", "deadline": _future_deadline(), "enroll_mode": "snapshot"},
+        json=_purse_payload(group.id, title="Closeable Fee"),
         headers=headers,
     )
     purse_id = create.json()["data"]["id"]
@@ -258,20 +246,16 @@ async def test_cannot_edit_closed_purse(client, db_session):
 async def test_rep_cannot_manage_another_reps_purse(client, db_session):
     org, group, headers_a = await _setup_group_with_admin(client, db_session)
 
-    org_b, group_b = await create_org_and_group(
+    org_b, _existing_group_b = await create_org_and_group(
         db_session, org_name="Other Uni", org_short_code="OU2", group_name="Other Dept", group_short_code="OD2"
     )
     admin_b_token = await _register_and_login_group_admin(client, email="repB@example.com")
     headers_b = {"Authorization": f"Bearer {admin_b_token}"}
-    await client.post(
-        "/group-admins/onboard",
-        json={"organization_id": str(org_b.id), "group_id": str(group_b.id)},
-        headers=headers_b,
-    )
+    await onboard_group_admin(client, db_session, org_b, headers_b, group_name="Other Group B")
 
     create = await client.post(
         "/purses",
-        json={"title": "A's Fee", "amount": "500.00", "deadline": _future_deadline(), "enroll_mode": "snapshot"},
+        json=_purse_payload(group.id, title="A's Fee"),
         headers=headers_a,
     )
     purse_id = create.json()["data"]["id"]
@@ -293,7 +277,7 @@ async def test_platform_admin_can_list_contributions_for_any_purse(client, db_se
     org, group, headers = await _setup_group_with_admin(client, db_session)
     create = await client.post(
         "/purses",
-        json={"title": "Cross-group visible fee", "amount": "500.00", "deadline": _future_deadline(), "enroll_mode": "snapshot"},
+        json=_purse_payload(group.id, title="Cross-group visible fee"),
         headers=headers,
     )
     purse_id = create.json()["data"]["id"]
@@ -314,13 +298,26 @@ async def test_same_group_admin_can_manage_purse_they_did_not_create(client, db_
     headers_b = {"Authorization": f"Bearer {admin_b_token}"}
     await client.post(
         "/group-admins/onboard",
-        json={"organization_id": str(org.id), "group_id": str(group.id)},
+        json={"organization_id": str(org.id), "new_group_name": "Second Admin's Own Group"},
         headers=headers_b,
     )
+    # headers_b now administers a *different* group than group -- to prove
+    # "same group, co-admin" access, headers_b must be given a GroupAdmin
+    # row on `group` itself (there is no API path for that -- co-admin
+    # invites are explicitly out of scope for this prompt -- see
+    # known-limitations.md), so this is set up directly in the DB instead.
+    from app.modules.group_admins.models import GroupAdmin
+    from app.modules.auth.models import User
+    from sqlalchemy import select
+
+    admin_b_email = "repB-sameteam@example.com"
+    user_b = (await db_session.execute(select(User).where(User.email == admin_b_email))).scalar_one()
+    db_session.add(GroupAdmin(user_id=user_b.id, group_id=group.id))
+    await db_session.commit()
 
     create = await client.post(
         "/purses",
-        json={"title": "A's Fee", "amount": "500.00", "deadline": _future_deadline(), "enroll_mode": "snapshot"},
+        json=_purse_payload(group.id, title="A's Fee"),
         headers=headers_a,
     )
     purse_id = create.json()["data"]["id"]
@@ -341,12 +338,7 @@ async def test_create_purse_idempotency_key_prevents_duplicate(client, db_sessio
     org, group, headers = await _setup_group_with_admin(client, db_session)
     headers_with_key = {**headers, "Idempotency-Key": "test-key-123"}
 
-    payload = {
-        "title": "Idempotent Fee",
-        "amount": "500.00",
-        "deadline": _future_deadline(),
-        "enroll_mode": "snapshot",
-    }
+    payload = _purse_payload(group.id, title="Idempotent Fee")
     first = await client.post("/purses", json=payload, headers=headers_with_key)
     second = await client.post("/purses", json=payload, headers=headers_with_key)
 
@@ -354,7 +346,7 @@ async def test_create_purse_idempotency_key_prevents_duplicate(client, db_sessio
     assert second.status_code == 201
     assert first.json()["data"]["id"] == second.json()["data"]["id"]
 
-    admin_purses = await client.get("/purses", headers=headers)
+    admin_purses = await client.get(f"/purses?group_id={group.id}", headers=headers)
     matching = [p for p in admin_purses.json()["data"]["items"] if p["title"] == "Idempotent Fee"]
     assert len(matching) == 1
 
@@ -365,12 +357,12 @@ async def test_create_purse_idempotency_key_conflict_on_different_body(client, d
 
     await client.post(
         "/purses",
-        json={"title": "First Fee", "amount": "500.00", "deadline": _future_deadline(), "enroll_mode": "snapshot"},
+        json=_purse_payload(group.id, title="First Fee"),
         headers=headers_with_key,
     )
     conflict = await client.post(
         "/purses",
-        json={"title": "Different Fee", "amount": "999.00", "deadline": _future_deadline(), "enroll_mode": "snapshot"},
+        json=_purse_payload(group.id, title="Different Fee", amount="999.00"),
         headers=headers_with_key,
     )
     assert conflict.status_code == 409
@@ -379,16 +371,16 @@ async def test_create_purse_idempotency_key_conflict_on_different_body(client, d
 
 async def test_purse_list_and_detail_role_aware_shapes(client, db_session):
     org, group, headers = await _setup_group_with_admin(client, db_session)
-    member_headers = await _invite_and_join_member(client, headers)
+    member_headers = await _invite_and_join_member(client, headers, group.id)
 
     create = await client.post(
         "/purses",
-        json={"title": "Shape Fee", "amount": "500.00", "deadline": _future_deadline(), "enroll_mode": "snapshot"},
+        json=_purse_payload(group.id, title="Shape Fee"),
         headers=headers,
     )
     purse_id = create.json()["data"]["id"]
 
-    rep_list = await client.get("/purses", headers=headers)
+    rep_list = await client.get(f"/purses?group_id={group.id}", headers=headers)
     assert "paid_count" in rep_list.json()["data"]["items"][0]
     assert "total_count" in rep_list.json()["data"]["items"][0]
 
@@ -409,18 +401,13 @@ async def test_purse_specific_invite_grants_eligibility_even_for_snapshot_purse(
 
     create = await client.post(
         "/purses",
-        json={
-            "title": "Excursion Fund",
-            "amount": "3000.00",
-            "deadline": _future_deadline(),
-            "enroll_mode": "snapshot",
-        },
+        json=_purse_payload(group.id, title="Excursion Fund", amount="3000.00"),
         headers=headers,
     )
     purse_id = create.json()["data"]["id"]
 
     invite = await client.post(
-        "/group-admins/invite-links",
+        f"/group-admins/invite-links?group_id={group.id}",
         json={"purse_id": purse_id, "expires_in_days": 7},
         headers=headers,
     )
@@ -440,6 +427,8 @@ async def test_purse_specific_invite_grants_eligibility_even_for_snapshot_purse(
         },
     )
     assert join.status_code == 201
+    verify_token = await find_redis_token("verify_email")
+    await client.post("/auth/verify-email", json={"email": "purse-specific@example.com", "token": verify_token})
     login = await client.post(
         "/auth/login", json={"email": "purse-specific@example.com", "password": "password123"}
     )
@@ -455,25 +444,21 @@ async def test_purse_specific_invite_grants_eligibility_even_for_snapshot_purse(
 
 async def test_invite_link_rejects_purse_from_another_group(client, db_session):
     org, group, headers = await _setup_group_with_admin(client, db_session)
-    other_org, other_group = await create_org_and_group(
+    other_org, _existing_other_group = await create_org_and_group(
         db_session, org_name="Other Uni", org_short_code="OU3", group_name="Other Dept", group_short_code="OD3"
     )
     other_admin_token = await _register_and_login_group_admin(client, email="other-rep@example.com")
     other_headers = {"Authorization": f"Bearer {other_admin_token}"}
-    await client.post(
-        "/group-admins/onboard",
-        json={"organization_id": str(other_org.id), "group_id": str(other_group.id)},
-        headers=other_headers,
-    )
+    other_group = await onboard_group_admin(client, db_session, other_org, other_headers, group_name="Other Group")
     other_purse = await client.post(
         "/purses",
-        json={"title": "Other Fee", "amount": "500.00", "deadline": _future_deadline(), "enroll_mode": "snapshot"},
+        json=_purse_payload(other_group.id, title="Other Fee"),
         headers=other_headers,
     )
     other_purse_id = other_purse.json()["data"]["id"]
 
     resp = await client.post(
-        "/group-admins/invite-links",
+        f"/group-admins/invite-links?group_id={group.id}",
         json={"purse_id": other_purse_id, "expires_in_days": 7},
         headers=headers,
     )
@@ -485,14 +470,14 @@ async def test_invite_link_rejects_closed_purse(client, db_session):
     org, group, headers = await _setup_group_with_admin(client, db_session)
     create = await client.post(
         "/purses",
-        json={"title": "Closed Fee", "amount": "500.00", "deadline": _future_deadline(), "enroll_mode": "snapshot"},
+        json=_purse_payload(group.id, title="Closed Fee"),
         headers=headers,
     )
     purse_id = create.json()["data"]["id"]
     await client.post(f"/purses/{purse_id}/close", headers=headers)
 
     resp = await client.post(
-        "/group-admins/invite-links",
+        f"/group-admins/invite-links?group_id={group.id}",
         json={"purse_id": purse_id, "expires_in_days": 7},
         headers=headers,
     )
@@ -505,18 +490,13 @@ async def test_admin_can_manually_add_existing_member_to_snapshot_purse(client, 
 
     create = await client.post(
         "/purses",
-        json={
-            "title": "Backfill Fee",
-            "amount": "750.00",
-            "deadline": _future_deadline(),
-            "enroll_mode": "snapshot",
-        },
+        json=_purse_payload(group.id, title="Backfill Fee", amount="750.00"),
         headers=headers,
     )
     purse_id = create.json()["data"]["id"]
 
     # Member joins the group after the snapshot purse already exists.
-    late_member_headers = await _invite_and_join_member(client, headers, email="late@example.com")
+    late_member_headers = await _invite_and_join_member(client, headers, group.id, email="late@example.com")
     member_me = await client.get("/members/me", headers=late_member_headers)
     member_id = member_me.json()["data"]["id"]
 
@@ -541,13 +521,13 @@ async def test_admin_can_manually_add_existing_member_to_snapshot_purse(client, 
 
 async def test_add_member_to_purse_rejects_duplicate_enrollment(client, db_session):
     org, group, headers = await _setup_group_with_admin(client, db_session)
-    member_headers = await _invite_and_join_member(client, headers, email="already-in@example.com")
+    member_headers = await _invite_and_join_member(client, headers, group.id, email="already-in@example.com")
     member_me = await client.get("/members/me", headers=member_headers)
     member_id = member_me.json()["data"]["id"]
 
     create = await client.post(
         "/purses",
-        json={"title": "Dues", "amount": "500.00", "deadline": _future_deadline(), "enroll_mode": "snapshot"},
+        json=_purse_payload(group.id, title="Dues"),
         headers=headers,
     )
     purse_id = create.json()["data"]["id"]
@@ -562,20 +542,14 @@ async def test_add_member_to_purse_rejects_duplicate_enrollment(client, db_sessi
 async def test_add_member_to_purse_rejects_cohort_mismatch(client, db_session):
     org, group, headers = await _setup_group_with_admin(client, db_session)
     late_member_headers = await _invite_and_join_member(
-        client, headers, cohort="300", email="wrongcohort@example.com"
+        client, headers, group.id, cohort="300", email="wrongcohort@example.com"
     )
     member_me = await client.get("/members/me", headers=late_member_headers)
     member_id = member_me.json()["data"]["id"]
 
     create = await client.post(
         "/purses",
-        json={
-            "title": "400L Dues",
-            "amount": "500.00",
-            "deadline": _future_deadline(),
-            "cohort": "400",
-            "enroll_mode": "snapshot",
-        },
+        json=_purse_payload(group.id, title="400L Dues", cohort="400"),
         headers=headers,
     )
     purse_id = create.json()["data"]["id"]
@@ -589,13 +563,13 @@ async def test_add_member_to_purse_rejects_cohort_mismatch(client, db_session):
 
 async def test_add_member_to_purse_rejects_closed_purse(client, db_session):
     org, group, headers = await _setup_group_with_admin(client, db_session)
-    late_member_headers = await _invite_and_join_member(client, headers, email="closedpurse@example.com")
+    late_member_headers = await _invite_and_join_member(client, headers, group.id, email="closedpurse@example.com")
     member_me = await client.get("/members/me", headers=late_member_headers)
     member_id = member_me.json()["data"]["id"]
 
     create = await client.post(
         "/purses",
-        json={"title": "Closed Dues", "amount": "500.00", "deadline": _future_deadline(), "enroll_mode": "snapshot"},
+        json=_purse_payload(group.id, title="Closed Dues"),
         headers=headers,
     )
     purse_id = create.json()["data"]["id"]
@@ -611,24 +585,20 @@ async def test_add_member_to_purse_rejects_closed_purse(client, db_session):
 async def test_add_member_to_purse_rejects_member_outside_group(client, db_session):
     org_a, group_a, headers_a = await _setup_group_with_admin(client, db_session)
 
-    org_b, group_b = await create_org_and_group(
+    org_b, _existing_group_b = await create_org_and_group(
         db_session, org_name="Other Uni", org_short_code="OU3", group_name="Other Dept", group_short_code="OD3"
     )
     admin_b_token = await _register_and_login_group_admin(client, email="repB-outsider@example.com")
     headers_b = {"Authorization": f"Bearer {admin_b_token}"}
-    await client.post(
-        "/group-admins/onboard",
-        json={"organization_id": str(org_b.id), "group_id": str(group_b.id)},
-        headers=headers_b,
-    )
+    group_b = await onboard_group_admin(client, db_session, org_b, headers_b, group_name="Group B")
 
-    other_member_headers = await _invite_and_join_member(client, headers_b, email="outsider@example.com")
+    other_member_headers = await _invite_and_join_member(client, headers_b, group_b.id, email="outsider@example.com")
     other_member_me = await client.get("/members/me", headers=other_member_headers)
     other_member_id = other_member_me.json()["data"]["id"]
 
     create = await client.post(
         "/purses",
-        json={"title": "Group A Dues", "amount": "500.00", "deadline": _future_deadline(), "enroll_mode": "snapshot"},
+        json=_purse_payload(group_a.id, title="Group A Dues"),
         headers=headers_a,
     )
     purse_id = create.json()["data"]["id"]
@@ -645,11 +615,11 @@ async def test_purse_list_pagination(client, db_session):
     for i in range(3):
         await client.post(
             "/purses",
-            json={"title": f"Fee {i}", "amount": "500.00", "deadline": _future_deadline(), "enroll_mode": "snapshot"},
+            json=_purse_payload(group.id, title=f"Fee {i}"),
             headers=headers,
         )
 
-    first_page = await client.get("/purses?limit=2&offset=0", headers=headers)
+    first_page = await client.get(f"/purses?group_id={group.id}&limit=2&offset=0", headers=headers)
     assert first_page.status_code == 200
     body = first_page.json()["data"]
     assert body["total"] == 3
@@ -657,23 +627,30 @@ async def test_purse_list_pagination(client, db_session):
     assert body["offset"] == 0
     assert len(body["items"]) == 2
 
-    second_page = await client.get("/purses?limit=2&offset=2", headers=headers)
+    second_page = await client.get(f"/purses?group_id={group.id}&limit=2&offset=2", headers=headers)
     body_2 = second_page.json()["data"]
     assert len(body_2["items"]) == 1
 
-    bad_limit = await client.get("/purses?limit=0", headers=headers)
+    bad_limit = await client.get(f"/purses?group_id={group.id}&limit=0", headers=headers)
     assert bad_limit.status_code == 422
+
+
+async def test_purse_list_requires_group_id_for_group_admin(client, db_session):
+    org, group, headers = await _setup_group_with_admin(client, db_session)
+    resp = await client.get("/purses", headers=headers)
+    assert resp.status_code == 422
+    assert resp.json()["error"]["code"] == "group_id_required"
 
 
 async def test_purse_contributions_pagination(client, db_session):
     org, group, headers = await _setup_group_with_admin(client, db_session)
-    await _invite_and_join_member(client, headers, email="pg1@example.com")
-    await _invite_and_join_member(client, headers, email="pg2@example.com")
-    await _invite_and_join_member(client, headers, email="pg3@example.com")
+    await _invite_and_join_member(client, headers, group.id, email="pg1@example.com")
+    await _invite_and_join_member(client, headers, group.id, email="pg2@example.com")
+    await _invite_and_join_member(client, headers, group.id, email="pg3@example.com")
 
     create = await client.post(
         "/purses",
-        json={"title": "Paginated Fee", "amount": "500.00", "deadline": _future_deadline(), "enroll_mode": "snapshot"},
+        json=_purse_payload(group.id, title="Paginated Fee"),
         headers=headers,
     )
     purse_id = create.json()["data"]["id"]

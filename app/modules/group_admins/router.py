@@ -12,6 +12,7 @@ from app.core.response import StandardResponse, success_response
 from app.modules.group_admins.schemas import (
     GroupAdminMeResponse,
     MemberListItem,
+    MyGroupListItem,
     OnboardGroupAdminRequest,
     OnboardGroupAdminResponse,
     RevokedResponse,
@@ -33,11 +34,15 @@ async def onboard(
     current_user: CurrentUser = Depends(get_current_group_admin_user),
     service: GroupAdminService = Depends(get_group_admin_service),
 ) -> JSONResponse:
-    admin = await service.onboard(current_user.id, payload)
+    # Callable any time, not just at first login -- an existing admin
+    # creating a second (third, ...) group goes through this same path.
+    admin, group = await service.onboard(current_user.id, payload)
     return success_response(
         {
             "id": str(admin.id),
             "group_id": str(admin.group_id),
+            "group_name": group.name,
+            "group_short_code": group.short_code,
             "cohort": admin.cohort,
             "is_active_admin": admin.is_active_admin,
         },
@@ -45,12 +50,36 @@ async def onboard(
     )
 
 
-@router.get("/me", response_model=StandardResponse[GroupAdminMeResponse])
-async def get_me(
+@router.get("/me/groups", response_model=StandardResponse[list[MyGroupListItem]])
+async def list_my_groups(
     current_user: CurrentUser = Depends(get_current_group_admin_user),
     service: GroupAdminService = Depends(get_group_admin_service),
 ) -> JSONResponse:
-    admin, user, group, members_count, purses_count = await service.get_me(current_user.id)
+    groups = await service.list_my_groups(current_user.id)
+    return success_response(
+        [
+            {
+                "id": str(g["id"]),
+                "name": g["name"],
+                "short_code": g["short_code"],
+                "organization_id": str(g["organization_id"]),
+                "organization_name": g["organization_name"],
+                "cohort": g["cohort"],
+                "members_count": g["members_count"],
+                "purses_count": g["purses_count"],
+            }
+            for g in groups
+        ]
+    )
+
+
+@router.get("/me", response_model=StandardResponse[GroupAdminMeResponse])
+async def get_me(
+    group_id: UUID = Query(...),
+    current_user: CurrentUser = Depends(get_current_group_admin_user),
+    service: GroupAdminService = Depends(get_group_admin_service),
+) -> JSONResponse:
+    admin, user, group, members_count, purses_count = await service.get_me(current_user.id, group_id)
     return success_response(
         {
             "id": str(admin.id),
@@ -67,10 +96,11 @@ async def get_me(
 @router.post("/invite-links", status_code=201, response_model=StandardResponse[InviteLinkCreateResponse])
 async def create_invite_link(
     payload: InviteLinkCreateRequest,
+    group_id: UUID = Query(...),
     current_user: CurrentUser = Depends(get_current_group_admin_user),
     service: GroupAdminService = Depends(get_group_admin_service),
 ) -> JSONResponse:
-    invite = await service.create_invite_link(current_user.id, payload)
+    invite = await service.create_invite_link(current_user.id, group_id, payload)
     return success_response(
         {
             "id": str(invite.id),
@@ -84,12 +114,13 @@ async def create_invite_link(
 
 @router.get("/invite-links", response_model=StandardResponse[Paginated[InviteLinkListItem]])
 async def list_invite_links(
+    group_id: UUID = Query(...),
     limit: int = Query(default=DEFAULT_LIMIT, ge=1, le=MAX_LIMIT),
     offset: int = Query(default=0, ge=0),
     current_user: CurrentUser = Depends(get_current_group_admin_user),
     service: GroupAdminService = Depends(get_group_admin_service),
 ) -> JSONResponse:
-    invites, total = await service.list_invite_links(current_user.id, limit, offset)
+    invites, total = await service.list_invite_links(current_user.id, group_id, limit, offset)
     return success_response(
         {
             "items": [
@@ -113,22 +144,24 @@ async def list_invite_links(
 @router.delete("/invite-links/{invite_id}", response_model=StandardResponse[RevokedResponse])
 async def revoke_invite_link(
     invite_id: UUID,
+    group_id: UUID = Query(...),
     current_user: CurrentUser = Depends(get_current_group_admin_user),
     service: GroupAdminService = Depends(get_group_admin_service),
 ) -> JSONResponse:
-    await service.revoke_invite_link(current_user.id, invite_id)
+    await service.revoke_invite_link(current_user.id, group_id, invite_id)
     return success_response({"revoked": True})
 
 
 @router.get("/members", response_model=StandardResponse[Paginated[MemberListItem]])
 async def list_members(
+    group_id: UUID = Query(...),
     cohort: Optional[str] = Query(default=None),
     limit: int = Query(default=DEFAULT_LIMIT, ge=1, le=MAX_LIMIT),
     offset: int = Query(default=0, ge=0),
     current_user: CurrentUser = Depends(get_current_group_admin_user),
     service: GroupAdminService = Depends(get_group_admin_service),
 ) -> JSONResponse:
-    rows, total = await service.list_members(current_user.id, cohort, limit, offset)
+    rows, total = await service.list_members(current_user.id, group_id, cohort, limit, offset)
     return success_response(
         {
             "items": [
@@ -137,10 +170,14 @@ async def list_members(
                     "name": f"{u.first_name} {u.last_name}",
                     "member_id_number": m.member_id_number,
                     "cohort": m.cohort,
-                    "invite_source": str(m.invite_source) if m.invite_source else None,
+                    "invite_source": (
+                        {"token_suffix": invite.token[-8:], "created_at": invite.created_at.isoformat()}
+                        if invite is not None
+                        else None
+                    ),
                     "joined_at": m.created_at.isoformat(),
                 }
-                for m, u in rows
+                for m, u, invite in rows
             ],
             "total": total,
             "limit": limit,

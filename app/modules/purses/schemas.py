@@ -19,6 +19,11 @@ def _assume_utc_if_naive(value: Optional[datetime]) -> Optional[datetime]:
 
 
 class CreatePurseRequest(BaseModel):
+    # Explicit rather than derived from "the admin's one group" -- an admin
+    # can now actively manage more than one group (see known-limitations.md
+    # / the multi-group admin support), so every group-scoped write names
+    # its target group directly.
+    group_id: UUID
     title: str = Field(min_length=1, max_length=255)
     amount: Decimal = Field(gt=0)
     deadline: datetime
@@ -57,6 +62,16 @@ class ContributionListItem(BaseModel):
     # avoid float precision loss) -- see known-limitations.md.
     amount_received: str
     paid_at: Optional[datetime] = None
+
+
+class MemberVisibleContributionItem(BaseModel):
+    """The full-transparency view any member of a purse's group can see --
+    deliberately thinner than ContributionListItem (the admin dispute-
+    resolution shape): name and status only, no amounts, no flag/manual-
+    payment notes, no ids."""
+
+    name: str
+    status: str
 
 
 class PurseSummary(BaseModel):
@@ -122,6 +137,10 @@ class PurseStatusResponse(BaseModel):
 
 class AvailableBalanceOut(BaseModel):
     purse_id: UUID
-    collected_total: str
-    paid_out_total: str
-    available_balance: str
+    # "custodian" (the balance figures below apply) or "direct" (payments
+    # go straight to the group's own account -- there is no held balance
+    # concept, so the money fields are null rather than a misleading "0").
+    settlement_mode: str
+    collected_total: Optional[str] = None
+    paid_out_total: Optional[str] = None
+    available_balance: Optional[str] = None

@@ -88,6 +88,7 @@ async def get_me(
             "group": {"id": str(group.id), "name": group.name, "short_code": group.short_code},
             "cohort": member.cohort,
             "verification_status": member.verification_status.value,
+            "member_id_number": member.member_id_number,
         }
     )
 

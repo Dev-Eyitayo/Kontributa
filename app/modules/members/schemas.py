@@ -36,6 +36,7 @@ class MemberMeResponse(BaseModel):
     group: GroupBrief
     cohort: Optional[str] = None
     verification_status: str
+    member_id_number: Optional[str] = None
 
 
 class MemberUpdateRequest(BaseModel):

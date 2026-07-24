@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from typing import Optional, Union
 from uuid import UUID
 
@@ -43,6 +44,24 @@ from app.modules.purses.service import PurseService
 router = APIRouter(prefix="/purses", tags=["purses"])
 
 IDEMPOTENCY_SCOPE_CREATE_PURSE = "purses:create"
+
+# Thresholds for the Group Admin dashboard's derived "pacing_status" --
+# see PurseListItemAdminOut's docstring for why this is a heuristic
+# against deadline + completion rather than true elapsed-time pacing.
+LAGGING_DEADLINE_DAYS = 5
+LAGGING_PERCENT_THRESHOLD = 90.0
+
+
+def _pacing_status(status: str, deadline: datetime, paid_count: int, total_count: int, now: datetime) -> Optional[str]:
+    if status != "open":
+        return None
+    if deadline < now:
+        return "pending_close"
+    percent_complete = (paid_count / total_count * 100) if total_count else 0.0
+    days_left = (deadline - now).total_seconds() / 86400
+    if days_left <= LAGGING_DEADLINE_DAYS and percent_complete < LAGGING_PERCENT_THRESHOLD:
+        return "lagging"
+    return "on_track"
 
 
 def get_purse_service(db: AsyncSession = Depends(get_db)) -> PurseService:
@@ -125,17 +144,25 @@ async def list_purses(
         admin = await GroupAdminService(db).get_by_user_id(current_user.id)
         purses, total = await PurseService(db).list_for_admin(admin, status, limit, offset)
         purse_ids = [p.id for p in purses]
-        counts = await ContributionService(db).counts_for_purses(purse_ids)
+        contribution_service = ContributionService(db)
+        counts = await contribution_service.counts_for_purses(purse_ids)
+        collected = await contribution_service.collected_totals_for_purses(purse_ids)
+        now = datetime.now(timezone.utc)
+        items = []
+        for p in purses:
+            paid_count, total_count = counts.get(p.id, (0, 0))
+            items.append(
+                {
+                    **_purse_out(p),
+                    "paid_count": paid_count,
+                    "total_count": total_count,
+                    "total_collected": str(collected.get(p.id, 0)),
+                    "pacing_status": _pacing_status(p.status.value, p.deadline, paid_count, total_count, now),
+                }
+            )
         return success_response(
             {
-                "items": [
-                    {
-                        **_purse_out(p),
-                        "paid_count": counts.get(p.id, (0, 0))[0],
-                        "total_count": counts.get(p.id, (0, 0))[1],
-                    }
-                    for p in purses
-                ],
+                "items": items,
                 "total": total,
                 "limit": limit,
                 "offset": offset,

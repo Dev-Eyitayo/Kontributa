@@ -173,6 +173,26 @@ class ContributionService:
             result[purse_id] = (paid, total)
         return result
 
+    async def collected_totals_for_purses(self, purse_ids: list[UUID]) -> dict[UUID, Decimal]:
+        """Returns {purse_id: total_collected} (paid + paid_manual amount_received)
+        for a batch of purses -- one query, so a purses-list screen can show a real
+        collected figure per row without an N+1 fetch of each purse's own summary."""
+        if not purse_ids:
+            return {}
+        stmt = (
+            select(Contribution.purse_id, func.coalesce(func.sum(Contribution.amount_received), 0))
+            .where(
+                Contribution.purse_id.in_(purse_ids),
+                Contribution.status.in_([ContributionStatus.PAID, ContributionStatus.PAID_MANUAL]),
+            )
+            .group_by(Contribution.purse_id)
+        )
+        rows = (await self.db.execute(stmt)).all()
+        result: dict[UUID, Decimal] = {pid: Decimal(0) for pid in purse_ids}
+        for purse_id, collected in rows:
+            result[purse_id] = collected
+        return result
+
     async def get_for_member(self, purse_id: UUID, member_id: UUID) -> Optional[Contribution]:
         result = await self.db.execute(
             select(Contribution).where(Contribution.purse_id == purse_id, Contribution.member_id == member_id)

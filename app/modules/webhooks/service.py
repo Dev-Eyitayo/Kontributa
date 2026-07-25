@@ -13,8 +13,9 @@ from app.modules.notifications.service import NotificationService, SendByteClien
 from app.modules.payments.service import parse_monnify_datetime
 from app.modules.payouts.models import Payout, PayoutStatus
 from app.modules.payouts.service import PayoutService
+from app.modules.realtime.service import RealtimeService
 from app.modules.webhooks.models import WebhookEvent
-from app.modules.webhooks.schemas import CollectionEventData, TransferEventData
+from app.modules.webhooks.schemas import CollectionEventData, RejectedPaymentEventData, TransferEventData
 
 logger = logging.getLogger("kontributa.webhooks")
 
@@ -70,6 +71,22 @@ def _extract_collection_event(raw_payload: str) -> CollectionEventData | None:
         amount_paid=Decimal(str(event_data.get("amountPaid", "0"))),
         payment_status=event_data.get("paymentStatus", ""),
         paid_on=parse_monnify_datetime(paid_on_raw) if paid_on_raw else None,
+    )
+
+
+def _extract_rejected_payment_event(raw_payload: str) -> RejectedPaymentEventData | None:
+    payload = json.loads(raw_payload)
+    if payload.get("eventType") != "REJECTED_PAYMENT":
+        return None
+
+    event_data = payload.get("eventData", {})
+    rejection_info = event_data.get("paymentRejectionInformation", {})
+    expected_amount = rejection_info.get("expectedAmount")
+    return RejectedPaymentEventData(
+        payment_reference=event_data.get("paymentReference", ""),
+        amount=Decimal(str(event_data.get("amount", "0"))),
+        rejection_reason=rejection_info.get("rejectionReason", ""),
+        expected_amount=Decimal(str(expected_amount)) if expected_amount is not None else None,
     )
 
 
@@ -132,7 +149,7 @@ async def process_transfer_webhook_event(
 
 
 async def process_collection_webhook_event(
-    event_id: UUID, session_factory: async_sessionmaker, sendbyte: SendByteClient
+    event_id: UUID, session_factory: async_sessionmaker, sendbyte: SendByteClient, realtime: RealtimeService
 ) -> None:
     """Runs as a FastAPI background task, after the 202 response has already
     been sent -- opens its own DB session since the request-scoped one may
@@ -148,6 +165,10 @@ async def process_collection_webhook_event(
 
         data = _extract_collection_event(event.raw_payload)
         if data is None:
+            rejected = _extract_rejected_payment_event(event.raw_payload)
+            if rejected is not None:
+                await _process_rejected_payment_event(db, service, event_id, rejected)
+                return
             await service.mark_processed(event_id, error="not a collection event")
             return
 
@@ -167,7 +188,13 @@ async def process_collection_webhook_event(
         # the reconciliation job calls this exact same method.
         notifications = NotificationService(db, sendbyte)
         contribution = await ContributionService(db).apply_payment_confirmation(
-            contribution, data.amount_paid, data.paid_on, ActorType.WEBHOOK, "Monnify webhook", notifications
+            contribution,
+            data.amount_paid,
+            data.paid_on,
+            ActorType.WEBHOOK,
+            "Monnify webhook",
+            notifications,
+            realtime,
         )
 
         await service.mark_processed(event_id)
@@ -177,3 +204,37 @@ async def process_collection_webhook_event(
             contribution.id,
             contribution.status.value,
         )
+
+
+async def _process_rejected_payment_event(
+    db: AsyncSession, service: WebhookService, event_id: UUID, data: RejectedPaymentEventData
+) -> None:
+    """Monnify rejected and reversed a transfer that didn't match the
+    invoice's exact amount -- no money was actually received, so this
+    never transitions a Contribution's status (it's still PENDING/EXPIRED
+    exactly as it was, and the member can regenerate/retry). This only
+    records *why* the transfer didn't register, instead of the event
+    disappearing into the generic "not a collection event" bucket."""
+    result = await db.execute(select(Contribution).where(Contribution.invoice_id == data.payment_reference))
+    contribution = result.scalar_one_or_none()
+
+    if contribution is None:
+        await service.mark_processed(
+            event_id, error=f"payment rejected by Monnify ({data.rejection_reason}); no matching contribution"
+        )
+        return
+
+    await service.mark_processed(
+        event_id,
+        error=(
+            f"payment rejected by Monnify: {data.rejection_reason} "
+            f"(sent {data.amount}, expected {data.expected_amount}) -- "
+            f"contribution {contribution.id} left as {contribution.status.value}, member can retry"
+        ),
+    )
+    logger.info(
+        "webhook event %s: Monnify rejected a mismatched payment for contribution %s (%s)",
+        event_id,
+        contribution.id,
+        data.rejection_reason,
+    )

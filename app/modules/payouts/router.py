@@ -24,6 +24,7 @@ from app.modules.payouts.schemas import (
     RejectPayoutRequest,
 )
 from app.modules.payouts.service import PayoutService, initiate_transfer_for_payout
+from app.modules.platform_settings.service import PlatformSettingsService
 
 router = APIRouter(prefix="/payouts", tags=["payouts"])
 
@@ -34,6 +35,10 @@ def get_payout_service(db: AsyncSession = Depends(get_db)) -> PayoutService:
 
 def get_group_admin_service(db: AsyncSession = Depends(get_db)) -> GroupAdminService:
     return GroupAdminService(db)
+
+
+def get_platform_settings_service(db: AsyncSession = Depends(get_db)) -> PlatformSettingsService:
+    return PlatformSettingsService(db)
 
 
 def _payout_out(p: Payout) -> dict:
@@ -54,9 +59,10 @@ async def create_payout(
     current_user: CurrentUser = Depends(get_current_group_admin_user),
     service: PayoutService = Depends(get_payout_service),
     admin_service: GroupAdminService = Depends(get_group_admin_service),
+    platform_settings: PlatformSettingsService = Depends(get_platform_settings_service),
 ) -> JSONResponse:
     admin = await admin_service.get_admin_for_group(current_user.id, payload.group_id)
-    payout = await service.create(admin, payload)
+    payout = await service.create(admin, payload, platform_settings)
     return success_response(
         {"id": str(payout.id), "status": payout.status.value, "amount": str(payout.amount)}, status_code=201
     )

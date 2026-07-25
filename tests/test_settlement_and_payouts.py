@@ -75,12 +75,19 @@ async def _setup_purse_with_paid_contribution(client, db_session, collected="250
     result = await db_session.execute(select(Contribution).where(Contribution.purse_id == purse_id))
     contribution = result.scalar_one()
 
-    mark = await client.post(
-        f"/contributions/{contribution.id}/mark-manual",
-        json={"amount_received": collected, "note": "cash collected"},
-        headers=headers,
-    )
-    assert mark.status_code == 200, mark.text
+    # Real, webhook-confirmed money (ContributionStatus.PAID) -- not
+    # PAID_MANUAL. Balance/payout tests need genuine "Monnify-held" funds
+    # to exercise available-balance and payout-request behavior correctly;
+    # going through mark-manual here would only prove PAID_MANUAL dollars
+    # behave as available balance, which is exactly the bug this suite
+    # must NOT depend on now that PAID_MANUAL is deliberately excluded
+    # from every collected/available-balance calculation.
+    from app.modules.contributions.models import ContributionStatus
+
+    contribution.status = ContributionStatus.PAID
+    contribution.amount_received = Decimal(collected)
+    contribution.paid_at = datetime.now(timezone.utc)
+    await db_session.commit()
 
     return org, group, headers, purse_id
 
@@ -112,12 +119,13 @@ async def _add_purse_with_collected_amount(client, db_session, headers, group_id
     result = await db_session.execute(select(Contribution).where(Contribution.purse_id == purse_id))
     contribution = result.scalar_one()
 
-    mark = await client.post(
-        f"/contributions/{contribution.id}/mark-manual",
-        json={"amount_received": collected, "note": "cash collected"},
-        headers=headers,
-    )
-    assert mark.status_code == 200, mark.text
+    # Real, webhook-confirmed money -- see _setup_purse_with_paid_contribution.
+    from app.modules.contributions.models import ContributionStatus
+
+    contribution.status = ContributionStatus.PAID
+    contribution.amount_received = Decimal(collected)
+    contribution.paid_at = datetime.now(timezone.utc)
+    await db_session.commit()
 
     return purse_id
 
@@ -829,3 +837,85 @@ async def test_switch_to_custodian_rejected_when_kill_switch_off(client, db_sess
 
     get_resp = await client.get(f"/groups/{group.id}/settlement-account", headers=headers)
     assert get_resp.json()["data"]["settlement_mode"] == "direct"
+
+
+async def test_payout_request_blocked_when_custodian_mode_disabled_platform_wide(client, db_session):
+    """A group that never explicitly configured a SettlementAccount row is
+    implicitly custodian mode everywhere else in this codebase -- so the
+    platform-wide kill switch has to be checked unconditionally on payout
+    creation too, not just when a group explicitly sets up/switches
+    settlement mode. Without this, a group with no SettlementAccount row
+    could still request a payout after custodian mode was disabled
+    platform-wide, which is exactly the bug this test guards against."""
+    org, group, headers, purse_id = await _setup_purse_with_paid_contribution(client, db_session, collected="2500.00")
+
+    admin_headers = await _admin_platform_headers(db_session)
+    disable = await client.patch("/admin/settings", json={"custodian_mode_enabled": False}, headers=admin_headers)
+    assert disable.status_code == 200
+
+    resp = await client.post(
+        "/payouts",
+        json={"group_id": str(group.id), "purse_id": purse_id, "amount": "1000.00"},
+        headers=headers,
+    )
+    assert resp.status_code == 403
+    assert resp.json()["error"]["code"] == "custodian_mode_disabled"
+
+
+async def test_paid_manual_excluded_from_collected_and_available_balance(client, db_session):
+    """PAID_MANUAL represents an offline/cash payment logged by a rep --
+    there is no real electronic money behind it anywhere in Monnify, so it
+    must never count toward collected_total/available_balance (the figures
+    that gate how much can actually be paid out). Only genuine PAID
+    (webhook-confirmed) money should."""
+    org, group, headers, purse_id = await _setup_purse_with_paid_contribution(client, db_session, collected="2500.00")
+
+    balance = await client.get(f"/purses/{purse_id}/available-balance", headers=headers)
+    assert balance.json()["data"]["collected_total"] == "2500.00"
+    assert balance.json()["data"]["available_balance"] == "2500.00"
+
+    # Add a second, snapshot-mode purse to the same group and log its
+    # contribution as PAID_MANUAL (real rep workflow) instead of PAID.
+    manual_purse_id = await _add_purse_with_collected_amount(
+        client, db_session, headers, group.id, "1500.00", "manual"
+    )
+    from sqlalchemy import select
+
+    from app.modules.contributions.models import Contribution, ContributionStatus
+
+    result = await db_session.execute(select(Contribution).where(Contribution.purse_id == manual_purse_id))
+    manual_contribution = result.scalar_one()
+    manual_contribution.status = ContributionStatus.PENDING
+    manual_contribution.amount_received = Decimal("0")
+    manual_contribution.paid_at = None
+    await db_session.commit()
+
+    mark = await client.post(
+        f"/contributions/{manual_contribution.id}/mark-manual",
+        json={"amount_received": "1500.00", "note": "cash collected"},
+        headers=headers,
+    )
+    assert mark.status_code == 200, mark.text
+
+    # The manually-logged purse's own balance must show 0, not 1500 -- a
+    # paid_manual contribution has no held Monnify funds to pay out.
+    manual_balance = await client.get(f"/purses/{manual_purse_id}/available-balance", headers=headers)
+    assert Decimal(manual_balance.json()["data"]["collected_total"]) == Decimal("0")
+    assert Decimal(manual_balance.json()["data"]["available_balance"]) == Decimal("0")
+
+    # The group-wide sweep balance must reflect only the real 2500 --
+    # the 1500 paid_manual must not leak in.
+    resp = await client.post(
+        "/payouts",
+        json={"group_id": str(group.id), "amount": "2500.00"},
+        headers=headers,
+    )
+    assert resp.status_code == 201, resp.text
+
+    over = await client.post(
+        "/payouts",
+        json={"group_id": str(group.id), "amount": "1.00"},
+        headers=headers,
+    )
+    assert over.status_code == 422
+    assert over.json()["error"]["code"] == "insufficient_balance"

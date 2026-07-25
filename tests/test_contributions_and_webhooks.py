@@ -104,6 +104,29 @@ def _webhook_body(payment_reference: str, amount_paid: str, transaction_referenc
     return json.dumps(payload).encode()
 
 
+def _rejected_payment_webhook_body(payment_reference: str, amount: str, expected_amount: str) -> bytes:
+    """Monnify's *default* behavior for a dynamic invoice: a transfer that
+    doesn't match the invoice's exact amount is rejected and reversed, and
+    this fires instead of SUCCESSFUL_TRANSACTION (confirmed against
+    Monnify's own webhook event-type docs) -- distinct from the
+    underpayment/overpayment SUCCESSFUL_TRANSACTION tests above, which
+    only apply once a merchant has explicitly configured their Monnify
+    contract to accept mismatched amounts instead of rejecting them."""
+    payload = {
+        "eventType": "REJECTED_PAYMENT",
+        "eventData": {
+            "paymentReference": payment_reference,
+            "amount": amount,
+            "transactionReference": f"MNFY|{uuid4().hex}",
+            "paymentRejectionInformation": {
+                "rejectionReason": "UNDER_PAYMENT",
+                "expectedAmount": expected_amount,
+            },
+        },
+    }
+    return json.dumps(payload).encode()
+
+
 async def _generate_invoice(client, headers, contribution_id) -> dict:
     resp = await client.post(f"/contributions/{contribution_id}/generate-invoice", headers=headers)
     assert resp.status_code == 200, resp.text
@@ -254,6 +277,38 @@ async def test_webhook_overpayment_flags_for_review(client, db_session):
 
     detail = await client.get(f"/contributions/{ctx['contribution_id']}", headers=ctx["member_headers"])
     assert detail.json()["data"]["status"] == "flagged_for_review"
+
+
+async def test_webhook_rejected_payment_leaves_contribution_pending(client, db_session):
+    """Monnify's default contract configuration rejects and reverses a
+    mismatched-amount transfer rather than completing it -- no money was
+    actually received, so this must never flag or otherwise change the
+    contribution's status (the member can just regenerate and retry with
+    the exact amount). The event should still be recorded, though, not
+    silently dropped -- see WebhookEvent.processing_error below."""
+    ctx = await _setup_purse_with_member(client, db_session, amount="2500.00")
+    await _generate_invoice(client, ctx["member_headers"], ctx["contribution_id"])
+
+    result = await db_session.execute(select(Contribution).where(Contribution.id == ctx["contribution_id"]))
+    contribution = result.scalar_one()
+
+    body = _rejected_payment_webhook_body(contribution.invoice_id, amount="2000.00", expected_amount="2500.00")
+    resp = await client.post("/webhooks/monnify", content=body, headers={"monnify-signature": _sign(body)})
+    assert resp.status_code == 202
+
+    detail = await client.get(f"/contributions/{ctx['contribution_id']}", headers=ctx["member_headers"])
+    assert detail.json()["data"]["status"] == "pending"
+    assert detail.json()["data"]["amount_received"] == "0.00"
+
+    from app.modules.webhooks.models import WebhookEvent
+
+    event_result = await db_session.execute(
+        select(WebhookEvent).where(WebhookEvent.raw_payload == body.decode())
+    )
+    event = event_result.scalar_one()
+    assert event.processed is True
+    assert "rejected" in event.processing_error.lower()
+    assert "UNDER_PAYMENT" in event.processing_error
 
 
 async def test_mark_manual_is_distinct_from_webhook_paid(client, db_session):

@@ -23,6 +23,7 @@ from app.modules.organizations.router import public_router as organizations_publ
 from app.modules.payouts.router import router as payouts_router
 from app.modules.platform_settings.router import router as platform_settings_router
 from app.modules.purses.router import router as purses_router
+from app.modules.realtime.router import router as realtime_router
 from app.modules.settlement.router import router as settlement_router
 from app.modules.webhooks.router import router as webhooks_router
 
@@ -88,6 +89,7 @@ app.include_router(payouts_router)
 app.include_router(audit_router)
 app.include_router(banks_router)
 app.include_router(platform_settings_router)
+app.include_router(realtime_router)
 
 
 @app.get("/health")

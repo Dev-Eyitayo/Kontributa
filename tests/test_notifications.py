@@ -198,12 +198,17 @@ async def _setup_purse_with_paid_contribution(client, db_session, collected="250
     result = await db_session.execute(select(Contribution).where(Contribution.purse_id == purse_id))
     contribution = result.scalar_one()
 
-    mark = await client.post(
-        f"/contributions/{contribution.id}/mark-manual",
-        json={"amount_received": collected, "note": "cash collected"},
-        headers=headers,
-    )
-    assert mark.status_code == 200, mark.text
+    # Real, webhook-confirmed money -- both callers of this helper go on
+    # to request a payout, which needs real available balance (PAID_MANUAL
+    # is deliberately excluded, see PayoutService._collected_total).
+    from decimal import Decimal
+
+    from app.modules.contributions.models import ContributionStatus
+
+    contribution.status = ContributionStatus.PAID
+    contribution.amount_received = Decimal(collected)
+    contribution.paid_at = datetime.now(timezone.utc)
+    await db_session.commit()
 
     return org, group, headers, purse_id
 

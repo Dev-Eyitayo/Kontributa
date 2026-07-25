@@ -271,12 +271,24 @@ async def test_app_role_cannot_update_or_delete_audit_log(client, db_session):
 
 
 async def test_payout_status_transitions_are_queryable_via_audit(client, db_session):
+    from sqlalchemy import select
+
     from app.core.auth import create_access_token
+    from app.modules.contributions.models import Contribution, ContributionStatus
     from tests.conftest import create_platform_admin
 
     org, group, headers, member_headers, purse_id, contribution_id = await _setup_purse_with_paid_contribution(
         client, db_session
     )
+
+    # This test is about the payout's own audit trail, not the mark-manual
+    # one -- needs real, Monnify-held money (ContributionStatus.PAID) to
+    # request a payout at all, since PAID_MANUAL is deliberately excluded
+    # from available_balance (see PayoutService._collected_total).
+    result = await db_session.execute(select(Contribution).where(Contribution.id == contribution_id))
+    contribution = result.scalar_one()
+    contribution.status = ContributionStatus.PAID
+    await db_session.commit()
 
     create = await client.post(
         "/payouts", json={"group_id": str(group.id), "purse_id": purse_id, "amount": "1000.00"}, headers=headers

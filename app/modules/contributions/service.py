@@ -18,6 +18,7 @@ from app.modules.notifications.service import NotificationService
 from app.modules.organizations.models import Group
 from app.modules.payments.service import MonnifyClient
 from app.modules.purses.models import EnrollMode, Purse, PurseStatus
+from app.modules.realtime.service import RealtimeService, contribution_channel_name
 from app.modules.settlement.models import SettlementAccount, SettlementMode
 
 _AUDIT_ACTOR_MAP = {
@@ -303,8 +304,29 @@ class ContributionService:
             context={"first_name": user.first_name, **context},
         )
 
+    async def _publish_status_change(self, realtime: Optional[RealtimeService], contribution: Contribution) -> None:
+        """Live nudge for whoever's sitting on the generate-invoice screen
+        for this exact contribution -- purely additive on top of the real
+        source of truth (Contribution.status itself), see RealtimeService's
+        own docstring for why a publish failure is swallowed there rather
+        than raised."""
+        if realtime is None:
+            return
+        await realtime.publish(
+            contribution_channel_name(contribution.id),
+            "status_change",
+            {
+                "status": contribution.status.value,
+                "amount_received": str(contribution.amount_received),
+                "paid_at": contribution.paid_at.isoformat() if contribution.paid_at else None,
+            },
+        )
+
     async def expire_if_needed(
-        self, contribution: Contribution, notifications: Optional[NotificationService] = None
+        self,
+        contribution: Contribution,
+        notifications: Optional[NotificationService] = None,
+        realtime: Optional[RealtimeService] = None,
     ) -> Contribution:
         """Lazily applies the pending -> expired transition once the stored
         invoice's validity window has lapsed.
@@ -329,6 +351,7 @@ class ContributionService:
             contribution.status = ContributionStatus.EXPIRED
             await self.db.commit()
             await self.db.refresh(contribution)
+            await self._publish_status_change(realtime, contribution)
 
             if notifications is not None:
                 purse = await self.db.get(Purse, contribution.purse_id)
@@ -442,6 +465,7 @@ class ContributionService:
         actor_type: ActorType,
         note_prefix: str,
         notifications: Optional[NotificationService] = None,
+        realtime: Optional[RealtimeService] = None,
     ) -> Optional[Contribution]:
         """The single place that decides how a payment confirmation --
         whether from a Monnify webhook or the reconciliation job polling
@@ -471,6 +495,7 @@ class ContributionService:
         await self._write_event(contribution, from_status, contribution.status, actor_type, None, note)
         await self.db.commit()
         await self.db.refresh(contribution)
+        await self._publish_status_change(realtime, contribution)
 
         if notifications is not None and contribution.status == ContributionStatus.PAID:
             purse = await self.db.get(Purse, contribution.purse_id)

@@ -18,6 +18,7 @@ from app.modules.admin.service import AdminService
 from app.modules.jobs.service import run_reconciliation
 from app.modules.notifications.service import NotificationService, SendByteClient, get_sendbyte_client
 from app.modules.payments.service import MonnifyClient, get_monnify_client
+from app.modules.realtime.service import RealtimeService, get_realtime_service
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -33,10 +34,11 @@ async def trigger_reconciliation(
     db: AsyncSession = Depends(get_db),
     monnify: MonnifyClient = Depends(get_monnify_client),
     sendbyte: SendByteClient = Depends(get_sendbyte_client),
+    realtime: RealtimeService = Depends(get_realtime_service),
 ) -> JSONResponse:
     purse_id = payload.purse_id if payload else None
     notifications = NotificationService(db, sendbyte)
-    checked, updated = await run_reconciliation(db, monnify, purse_id, notifications)
+    checked, updated = await run_reconciliation(db, monnify, purse_id, notifications, realtime)
     return success_response({"checked": checked, "updated": updated})
 
 

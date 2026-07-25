@@ -10,6 +10,7 @@ from app.core.exceptions import AuthError
 from app.core.response import StandardResponse, success_response
 from app.modules.notifications.service import SendByteClient, get_sendbyte_client
 from app.modules.payments.service import MonnifyClient
+from app.modules.realtime.service import RealtimeService, get_realtime_service
 from app.modules.webhooks.schemas import ReceivedResponse
 from app.modules.webhooks.service import (
     WebhookService,
@@ -26,6 +27,7 @@ async def monnify_webhook(
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     sendbyte: SendByteClient = Depends(get_sendbyte_client),
+    realtime: RealtimeService = Depends(get_realtime_service),
 ) -> JSONResponse:
     raw_body = await request.body()
     signature = request.headers.get("monnify-signature", "")
@@ -42,7 +44,7 @@ async def monnify_webhook(
 
     if is_new:
         session_factory = async_sessionmaker(bind=db.bind, expire_on_commit=False)
-        background_tasks.add_task(process_collection_webhook_event, event.id, session_factory, sendbyte)
+        background_tasks.add_task(process_collection_webhook_event, event.id, session_factory, sendbyte, realtime)
 
     return success_response({"received": True}, status_code=202)
 

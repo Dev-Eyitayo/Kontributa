@@ -3,7 +3,7 @@ import hashlib
 import hmac
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from typing import Optional
+from typing import Optional, Union
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -106,7 +106,9 @@ class MonnifyClient:
         self._token_expires_at = datetime.now(timezone.utc) + timedelta(seconds=max(expires_in - 60, 30))
         return token
 
-    async def _request(self, method: str, path: str, json_body: Optional[dict] = None) -> dict:
+    async def _request(
+        self, method: str, path: str, json_body: Optional[Union[dict, list]] = None
+    ) -> Union[dict, list]:
         token = await self._authenticate()
         async with httpx.AsyncClient(base_url=self._base_url, timeout=15) as http:
             resp = await http.request(method, path, json=json_body, headers={"Authorization": f"Bearer {token}"})
@@ -217,28 +219,25 @@ class MonnifyClient:
         reused as-is beforehand; this call only runs after that's already
         confirmed the account holder's name.
 
-        Per Monnify's Create Sub-Account API this is a batch endpoint (an
-        array of sub-account specs) even for a single one -- still
-        best-effort like verify_account_name and create_invoice, worth one
-        real sandbox call to confirm the exact response shape before this
-        is offered as a live option (see known-limitations.md: Direct mode
-        also depends on Monnify activating sub-account access on the
-        account, an operational step outside this codebase).
+        Per Monnify's own documented Create Sub-Account request, the body
+        is a bare JSON array of sub-account specs -- not an object
+        wrapping one -- even for a single sub-account. Sending
+        {"subAccounts": [...]} instead is exactly what produced the
+        "malformed syntax" error from Monnify's API; confirmed fixed with
+        a real Monnify sandbox call returning a genuine subAccountCode.
         """
         body = await self._request(
             "POST",
             "/api/v1/sub-accounts",
-            {
-                "subAccounts": [
-                    {
-                        "currencyCode": "NGN",
-                        "bankCode": bank_code,
-                        "accountNumber": account_number,
-                        "email": email,
-                        "defaultSplitPercentage": float(split_percentage),
-                    }
-                ]
-            },
+            [
+                {
+                    "currencyCode": "NGN",
+                    "bankCode": bank_code,
+                    "accountNumber": account_number,
+                    "email": email,
+                    "defaultSplitPercentage": float(split_percentage),
+                }
+            ],
         )
         accounts = body if isinstance(body, list) else body.get("subAccounts", [])
         first = accounts[0] if accounts else {}

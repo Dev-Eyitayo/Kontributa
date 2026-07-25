@@ -11,6 +11,7 @@ from app.modules.contributions.models import ActorType, Contribution, Contributi
 from app.modules.contributions.service import ContributionService
 from app.modules.notifications.service import NotificationService
 from app.modules.payments.service import MonnifyClient, MonnifyError
+from app.modules.realtime.service import RealtimeService
 
 logger = logging.getLogger("kontributa.reconciliation")
 
@@ -20,6 +21,7 @@ async def run_reconciliation(
     monnify: MonnifyClient,
     purse_id: Optional[UUID] = None,
     notifications: Optional[NotificationService] = None,
+    realtime: Optional[RealtimeService] = None,
 ) -> tuple[int, int]:
     """Finds every Contribution still pending past a safe threshold and
     queries Monnify's transaction status directly for each -- covers a
@@ -48,6 +50,8 @@ async def run_reconciliation(
 
     contributions = (await db.execute(stmt)).scalars().all()
     contribution_service = ContributionService(db)
+    if realtime is None:
+        realtime = RealtimeService()
 
     checked = 0
     updated = 0
@@ -55,7 +59,7 @@ async def run_reconciliation(
     for contribution in contributions:
         checked += 1
 
-        contribution = await contribution_service.expire_if_needed(contribution, notifications)
+        contribution = await contribution_service.expire_if_needed(contribution, notifications, realtime)
         if contribution.status != ContributionStatus.PENDING:
             updated += 1
             continue
@@ -76,6 +80,7 @@ async def run_reconciliation(
             ActorType.RECONCILIATION_JOB,
             "Reconciliation job",
             notifications,
+            realtime,
         )
         if result is not None:
             updated += 1

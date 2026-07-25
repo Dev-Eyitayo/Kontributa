@@ -55,6 +55,13 @@ class Settings(BaseSettings):
     RECONCILIATION_INTERVAL_MINUTES: int = 20
     RECONCILIATION_PENDING_THRESHOLD_MINUTES: int = 60
 
+    # Format: "{appId}.{keyId}:{keySecret}", from the Ably dashboard.
+    # Server-side only -- never sent to the frontend. Realtime is an
+    # enhancement layered on top of the reconciliation job above (the
+    # real safety net), not a replacement for it; left blank, the app
+    # keeps working exactly as it does today, just without the live push.
+    ABLY_API_KEY: str = ""
+
     SENDBYTE_BASE_URL: str = "https://api.sendbyte.africa"
     SENDBYTE_API_KEY: str = ""
     SENDBYTE_FROM_EMAIL: str = "noreply@kontributa.app"

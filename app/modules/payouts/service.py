@@ -18,6 +18,7 @@ from app.modules.organizations.models import Group
 from app.modules.payments.service import MonnifyClient, MonnifyError
 from app.modules.payouts.models import Payout, PayoutActorType, PayoutAllocation, PayoutEvent, PayoutStatus
 from app.modules.payouts.schemas import CreatePayoutRequest
+from app.modules.platform_settings.service import PlatformSettingsService
 from app.modules.purses.models import Purse
 from app.modules.settlement.models import SettlementAccount, SettlementMode
 
@@ -68,10 +69,18 @@ class PayoutService:
         )
 
     async def _collected_total(self, purse_id: UUID) -> Decimal:
+        """Real, Monnify-held money only -- deliberately excludes
+        PAID_MANUAL. A manually-logged (offline/cash) payment has no
+        actual electronic funds behind it anywhere in Monnify, so it must
+        never inflate a balance that represents what's actually
+        available to pay out. (The purses-list "total collected" stat is
+        a separate figure -- ContributionService.collected_totals_for_purses
+        -- that correctly does include PAID_MANUAL, since that one just
+        means "everything this purse has collected by any method.")"""
         result = await self.db.execute(
             select(func.coalesce(func.sum(Contribution.amount_received), 0)).where(
                 Contribution.purse_id == purse_id,
-                Contribution.status.in_([ContributionStatus.PAID, ContributionStatus.PAID_MANUAL]),
+                Contribution.status == ContributionStatus.PAID,
             )
         )
         return result.scalar_one()
@@ -132,10 +141,12 @@ class PayoutService:
 
         collected_total = Decimal(0)
         if purse_ids:
+            # Real, Monnify-held money only -- see _collected_total's
+            # docstring; PAID_MANUAL is deliberately excluded here too.
             collected_result = await self.db.execute(
                 select(func.coalesce(func.sum(Contribution.amount_received), 0)).where(
                     Contribution.purse_id.in_(purse_ids),
-                    Contribution.status.in_([ContributionStatus.PAID, ContributionStatus.PAID_MANUAL]),
+                    Contribution.status == ContributionStatus.PAID,
                 )
             )
             collected_total = collected_result.scalar_one()
@@ -194,9 +205,26 @@ class PayoutService:
                 PayoutAllocation(payout_id=payout.id, purse_id=purse.id, allocated_amount=share)
             )
 
-    async def create(self, admin: GroupAdmin, payload: CreatePayoutRequest) -> Payout:
+    async def create(
+        self, admin: GroupAdmin, payload: CreatePayoutRequest, platform_settings: PlatformSettingsService
+    ) -> Payout:
         if payload.group_id != admin.group_id:
             raise ForbiddenError("cannot request a payout for another group")
+
+        settings_row = await platform_settings.get_or_create()
+        if not settings_row.custodian_mode_enabled:
+            # A group with no explicit SettlementAccount row is implicitly
+            # custodian mode everywhere else in this codebase (see
+            # purses/router.py's own settlement_mode fallback) -- so this
+            # platform-wide kill switch has to be checked unconditionally
+            # here too, not just the per-group settlement_mode below, or a
+            # group that never explicitly configured settlement slips past
+            # a platform that has since gone Direct-only.
+            raise ForbiddenError(
+                "custodian mode is currently disabled platform-wide -- Direct is the only "
+                "settlement mode available right now, so there is no held balance to pay out",
+                code="custodian_mode_disabled",
+            )
 
         settlement = (
             await self.db.execute(select(SettlementAccount).where(SettlementAccount.group_id == admin.group_id))

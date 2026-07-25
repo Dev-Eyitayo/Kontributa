@@ -20,6 +20,7 @@ from app.modules.payments.schemas import (
 )
 from app.modules.payments.service import MonnifyError, get_monnify_client
 from app.modules.notifications.service import SendByteError, get_sendbyte_client
+from app.modules.realtime.service import RealtimeService, get_realtime_service
 
 # Ensure every module's models are registered on Base.metadata before create_all.
 from app.modules.audit import models as _audit_models  # noqa: F401
@@ -194,6 +195,21 @@ class FakeSendByteClient:
         return f"fake-message-{len(self.sent)}"
 
 
+class FakeRealtimeService(RealtimeService):
+    """Real HMAC token-signing logic (pure/local, worth exercising for
+    real) but publish() records instead of making a real network call to
+    Ably -- webhook/reconciliation tests would otherwise hit the real
+    internet on every run just because .env carries a real ABLY_API_KEY
+    for manual/dev use."""
+
+    def __init__(self):
+        super().__init__(api_key="fake-app.fake-key:fake-secret")
+        self.published: list[dict] = []
+
+    async def publish(self, channel: str, name: str, data: dict) -> None:
+        self.published.append({"channel": channel, "name": name, "data": data})
+
+
 @pytest_asyncio.fixture(autouse=True)
 async def db_setup():
     # Function-scoped so the async engine and its connections are bound to
@@ -212,12 +228,14 @@ async def db_setup():
 
     fake_monnify = FakeMonnifyClient()
     fake_sendbyte = FakeSendByteClient()
+    fake_realtime = FakeRealtimeService()
 
     _state["engine"] = engine
     _state["session_local"] = session_local
     _state["redis"] = fake_redis
     _state["monnify"] = fake_monnify
     _state["sendbyte"] = fake_sendbyte
+    _state["realtime"] = fake_realtime
 
     async def _override_get_db():
         async with session_local() as session:
@@ -232,10 +250,14 @@ async def db_setup():
     def _override_get_sendbyte_client():
         return fake_sendbyte
 
+    def _override_get_realtime_service():
+        return fake_realtime
+
     app.dependency_overrides[get_db] = _override_get_db
     app.dependency_overrides[get_redis] = _override_get_redis
     app.dependency_overrides[get_monnify_client] = _override_get_monnify_client
     app.dependency_overrides[get_sendbyte_client] = _override_get_sendbyte_client
+    app.dependency_overrides[get_realtime_service] = _override_get_realtime_service
 
     yield
 
@@ -254,6 +276,7 @@ async def db_setup():
     app.dependency_overrides.pop(get_redis, None)
     app.dependency_overrides.pop(get_monnify_client, None)
     app.dependency_overrides.pop(get_sendbyte_client, None)
+    app.dependency_overrides.pop(get_realtime_service, None)
 
 
 @pytest_asyncio.fixture(autouse=True)

@@ -5,7 +5,11 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     ENV: str = "development"
-    APP_BASE_URL: str = "http://localhost:8000"
+    # Where the Next.js frontend is served -- invite links are handed to a
+    # browser, which needs the frontend's own /invites/{token} page, never
+    # this backend's own address (the old APP_BASE_URL default of
+    # localhost:8000 was exactly that mistake).
+    FRONTEND_BASE_URL: str = "http://localhost:3000"
     LOG_LEVEL: str = "INFO"
 
     # Superuser connection -- used only for migrations and test schema bootstrap

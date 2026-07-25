@@ -110,7 +110,7 @@ class InviteService:
 
     @staticmethod
     def build_url(token: str) -> str:
-        return f"{settings.APP_BASE_URL}/invites/{token}"
+        return f"{settings.FRONTEND_BASE_URL}/invites/{token}"
 
     @staticmethod
     def is_active(invite: InviteLink) -> bool:

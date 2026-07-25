@@ -1,4 +1,4 @@
-from typing import Literal
+from typing import Literal, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, EmailStr, Field
@@ -53,22 +53,28 @@ class LoginRequest(BaseModel):
 
 
 class LoginResponse(BaseModel):
-    access_token: str
-    refresh_token: str
+    # Absent (None) when USE_HTTPONLY_COOKIES is on -- the tokens are set
+    # as httpOnly cookies instead of being returned in the body. role is
+    # always present either way, since the frontend needs it for
+    # role-based routing regardless of auth mode.
+    access_token: Optional[str] = None
+    refresh_token: Optional[str] = None
     role: str
 
 
 class RefreshTokenRequest(BaseModel):
-    refresh_token: str
+    # Optional -- in cookie mode the refresh token comes from the
+    # httpOnly cookie instead, never a body field.
+    refresh_token: Optional[str] = None
 
 
 class RefreshTokenResponse(BaseModel):
-    access_token: str
-    refresh_token: str
+    access_token: Optional[str] = None
+    refresh_token: Optional[str] = None
 
 
 class LogoutRequest(BaseModel):
-    refresh_token: str
+    refresh_token: Optional[str] = None
 
 
 class LogoutResponse(BaseModel):

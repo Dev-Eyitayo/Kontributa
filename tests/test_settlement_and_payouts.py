@@ -1,8 +1,12 @@
 import asyncio
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from uuid import UUID
+
+from sqlalchemy import select
 
 from app.core.auth import create_access_token
+from app.modules.contributions.models import Contribution
 from tests.conftest import _state, create_org_and_group, create_platform_admin, find_redis_token, onboard_group_admin
 
 
@@ -680,6 +684,94 @@ async def test_direct_mode_invoice_has_split_config(client, db_session):
     split_config = _state["monnify"].invoice_split_configs[real_reference]
     assert split_config is not None
     assert split_config[0]["subAccountCode"] == sub_account_code
+    # default_platform_settings seeds platform_fee_percent at the model's
+    # default of 1% -- the sub-account's share is the other 99%, expressed
+    # via splitPercentage (not feePercentage, which instead governs who
+    # bears Monnify's own processing fee and stays at 0/false here since
+    # that fee is never split -- see generate_invoice's docstring).
+    assert split_config[0]["splitPercentage"] == 99.0
+    assert split_config[0]["feePercentage"] == 0
+    assert split_config[0]["feeBearer"] is False
+
+
+async def test_direct_mode_invoice_locks_in_platform_fee_percent_at_generation(client, db_session):
+    """A later platform_fee_percent edit must not retroactively change the
+    split on an invoice that's already live -- generate-invoice is
+    idempotent while the invoice hasn't expired, so calling it again after
+    the fee percent changes must neither create a second Monnify invoice
+    nor change the stored applied rate."""
+    admin_headers = await _admin_platform_headers(db_session)
+    org, group, headers, member_headers, contribution_id = await _setup_purse_with_verified_pending_member(
+        client, db_session, email="lockin-rep@example.com"
+    )
+    switch = await client.post(
+        f"/groups/{group.id}/settlement-account/direct",
+        json={"bank_code": "058", "account_number": "0123456789", "confirmed_account_name": "Default Resolved Name"},
+        headers=headers,
+    )
+    assert switch.status_code == 201, switch.text
+
+    first = await client.post(f"/contributions/{contribution_id}/generate-invoice", headers=member_headers)
+    assert first.status_code == 200, first.text
+    assert len(_state["monnify"].created_invoices) == 1
+    first_reference = _state["monnify"].created_invoices[0]
+    assert _state["monnify"].invoice_split_configs[first_reference][0]["splitPercentage"] == 99.0
+
+    patch = await client.patch("/admin/settings", json={"platform_fee_percent": "10.00"}, headers=admin_headers)
+    assert patch.status_code == 200
+
+    second = await client.post(f"/contributions/{contribution_id}/generate-invoice", headers=member_headers)
+    assert second.status_code == 200, second.text
+    # Still live -- no second Monnify invoice was created at all, so
+    # there's nothing whose split could have changed.
+    assert len(_state["monnify"].created_invoices) == 1
+
+    contribution_resp = await client.get(f"/contributions/{contribution_id}", headers=member_headers)
+    assert contribution_resp.json()["data"]["account_number"] is not None
+
+    result = await db_session.execute(select(Contribution).where(Contribution.id == UUID(contribution_id)))
+    contribution = result.scalar_one()
+    assert contribution.platform_fee_percent_applied == Decimal("1.00")
+
+
+async def test_direct_mode_new_invoice_after_expiry_uses_current_platform_fee_percent(client, db_session):
+    """Once the live invoice actually expires, regenerating creates a
+    genuinely new Monnify invoice -- that new invoice (and only that one)
+    should reflect whatever platform_fee_percent is configured *now*."""
+    admin_headers = await _admin_platform_headers(db_session)
+    org, group, headers, member_headers, contribution_id = await _setup_purse_with_verified_pending_member(
+        client, db_session, email="refresh-rep@example.com"
+    )
+    switch = await client.post(
+        f"/groups/{group.id}/settlement-account/direct",
+        json={"bank_code": "058", "account_number": "0123456789", "confirmed_account_name": "Default Resolved Name"},
+        headers=headers,
+    )
+    assert switch.status_code == 201, switch.text
+
+    first = await client.post(f"/contributions/{contribution_id}/generate-invoice", headers=member_headers)
+    assert first.status_code == 200, first.text
+
+    result = await db_session.execute(select(Contribution).where(Contribution.id == UUID(contribution_id)))
+    contribution = result.scalar_one()
+    contribution.invoice_expires_at = datetime.now(timezone.utc) - timedelta(minutes=1)
+    await db_session.commit()
+
+    patch = await client.patch("/admin/settings", json={"platform_fee_percent": "10.00"}, headers=admin_headers)
+    assert patch.status_code == 200
+
+    second = await client.post(f"/contributions/{contribution_id}/generate-invoice", headers=member_headers)
+    assert second.status_code == 200, second.text
+    assert len(_state["monnify"].created_invoices) == 2
+    second_reference = _state["monnify"].created_invoices[1]
+    assert _state["monnify"].invoice_split_configs[second_reference][0]["splitPercentage"] == 90.0
+
+    # db_session already has this row in its identity map from the earlier
+    # query above (expire_on_commit=False), so a bare re-SELECT returns the
+    # cached object as-is rather than what the API's own separate session
+    # just committed -- refresh() forces a real reload.
+    await db_session.refresh(contribution)
+    assert contribution.platform_fee_percent_applied == Decimal("10.00")
 
 
 async def test_switch_custodian_to_direct_blocked_with_outstanding_balance(client, db_session):

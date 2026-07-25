@@ -23,7 +23,10 @@ class PlatformSettings(Base):
     # itself still needs Monnify's sub-account feature activated before
     # this should be flipped on in production.
     custodian_mode_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    platform_fee_percent: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False, default=Decimal("0"))
+    # Kontributa's cut of a Direct-mode contribution, taken via the
+    # sub-account split at invoice-generation time (see
+    # ContributionService.generate_invoice) -- 1% by default.
+    platform_fee_percent: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False, default=Decimal("1"))
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(

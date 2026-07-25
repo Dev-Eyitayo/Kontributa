@@ -79,12 +79,18 @@ async def get_settlement_options(
     platform_settings: PlatformSettingsService = Depends(get_platform_settings_service),
 ) -> JSONResponse:
     # Read-only, group-admin-reachable signal for whether Custodian mode is
-    # offered at all -- deliberately separate from /admin/settings (platform
-    # admin only), which also holds platform_fee_percent that a group admin
-    # has no business seeing.
+    # offered at all, plus the current platform fee percent -- the latter
+    # is disclosed to group admins on purpose (Settlement Setup, Purse
+    # Creation both show it), unlike write access to /admin/settings
+    # itself, which stays platform-admin only.
     await _assert_admin_of_group(db, current_user, group_id)
     settings_row = await platform_settings.get_or_create()
-    return success_response({"custodian_mode_enabled": settings_row.custodian_mode_enabled})
+    return success_response(
+        {
+            "custodian_mode_enabled": settings_row.custodian_mode_enabled,
+            "platform_fee_percent": str(settings_row.platform_fee_percent),
+        }
+    )
 
 
 @router.post("/{group_id}/settlement-account", response_model=StandardResponse[SettlementAccountResponse])

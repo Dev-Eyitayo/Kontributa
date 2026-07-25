@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Literal, Optional
 from uuid import UUID
 
@@ -16,6 +17,7 @@ class GroupOut(BaseModel):
     id: UUID
     name: str
     short_code: str
+    cohort: Optional[str] = None
 
 
 class AdminCreateOrganizationRequest(BaseModel):
@@ -52,3 +54,47 @@ class AdminGroupResponse(BaseModel):
     organization_id: UUID
     name: str
     short_code: str
+
+
+class AdminUpdateGroupRequest(BaseModel):
+    name: Optional[str] = None
+    short_code: Optional[str] = None
+    cohort: Optional[str] = None
+
+
+class AdminGroupDetailResponse(BaseModel):
+    id: UUID
+    organization_id: UUID
+    name: str
+    short_code: str
+    cohort: Optional[str] = None
+
+
+class AdminInviteSourceSummary(BaseModel):
+    token_suffix: str
+    created_at: datetime
+
+
+class AdminMemberListItem(BaseModel):
+    id: UUID
+    name: str
+    member_id_number: Optional[str] = None
+    cohort: Optional[str] = None
+    invite_source: Optional[AdminInviteSourceSummary] = None
+    joined_at: datetime
+
+
+class AdminUpdateMemberRequest(BaseModel):
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    member_id_number: Optional[str] = None
+
+
+class AdminMemberResponse(BaseModel):
+    id: UUID
+    name: str
+    member_id_number: Optional[str] = None
+
+
+class RemoveMemberResponse(BaseModel):
+    removed: bool = True

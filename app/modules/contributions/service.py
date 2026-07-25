@@ -17,6 +17,7 @@ from app.modules.members.models import Member
 from app.modules.notifications.service import NotificationService
 from app.modules.organizations.models import Group
 from app.modules.payments.service import MonnifyClient
+from app.modules.platform_settings.service import PlatformSettingsService
 from app.modules.purses.models import EnrollMode, Purse, PurseStatus
 from app.modules.realtime.service import RealtimeService, contribution_channel_name
 from app.modules.settlement.models import SettlementAccount, SettlementMode
@@ -151,6 +152,20 @@ class ContributionService:
         result = await self.db.execute(stmt.order_by(Contribution.created_at).limit(limit).offset(offset))
         return [(row[0], row[1], row[2]) for row in result.all()], total
 
+    async def list_all_for_purse(self, purse_id: UUID) -> list[tuple[Contribution, Member, User]]:
+        """Every contribution for a purse, unpaginated -- for the
+        contribution report export, which needs the complete set in one
+        pass rather than a page at a time."""
+        stmt = (
+            select(Contribution, Member, User)
+            .join(Member, Contribution.member_id == Member.id)
+            .join(User, Member.user_id == User.id)
+            .where(Contribution.purse_id == purse_id)
+            .order_by(Contribution.created_at)
+        )
+        result = await self.db.execute(stmt)
+        return [(row[0], row[1], row[2]) for row in result.all()]
+
     async def summary_for_purse(self, purse_id: UUID) -> dict:
         stmt = select(Contribution.status, func.count(), func.coalesce(func.sum(Contribution.amount_received), 0)).where(
             Contribution.purse_id == purse_id
@@ -163,9 +178,15 @@ class ContributionService:
             counts[status.value] = count
             collected_by_status[status.value] = collected
 
-        total_collected = collected_by_status.get(ContributionStatus.PAID.value, Decimal(0)) + collected_by_status.get(
-            ContributionStatus.PAID_MANUAL.value, Decimal(0)
-        )
+        # Split by source: PAID is real, Monnify-confirmed money; PAID_MANUAL
+        # is a rep's own record of an offline/cash payment, with no actual
+        # electronic funds behind it (see PayoutService's balance
+        # calculations, which deliberately exclude PAID_MANUAL for exactly
+        # this reason). total_collected stays their sum for backward
+        # compatibility with existing progress displays.
+        collected_via_kontributa = collected_by_status.get(ContributionStatus.PAID.value, Decimal(0))
+        collected_manually = collected_by_status.get(ContributionStatus.PAID_MANUAL.value, Decimal(0))
+        total_collected = collected_via_kontributa + collected_manually
         total_count = sum(counts.values())
         completed_count = counts[ContributionStatus.PAID.value] + counts[ContributionStatus.PAID_MANUAL.value]
         percent_complete = round((completed_count / total_count) * 100, 2) if total_count else 0.0
@@ -176,6 +197,8 @@ class ContributionService:
             "expired_count": counts[ContributionStatus.EXPIRED.value],
             "flagged_count": counts[ContributionStatus.FLAGGED_FOR_REVIEW.value],
             "total_collected": total_collected,
+            "collected_via_kontributa": collected_via_kontributa,
+            "collected_manually": collected_manually,
             "percent_complete": percent_complete,
         }
 
@@ -376,6 +399,7 @@ class ContributionService:
         member_user: User,
         purse: Purse,
         notifications: Optional[NotificationService] = None,
+        platform_settings: Optional[PlatformSettingsService] = None,
     ) -> Contribution:
         contribution = await self.expire_if_needed(contribution, notifications)
 
@@ -413,15 +437,37 @@ class ContributionService:
         # setup is somehow missing) get exactly today's behavior. Either
         # way, payment confirmation below is still detected off our own
         # invoice_reference -- this only changes where the money settles.
+        #
+        # splitPercentage is the field that actually routes a share of the
+        # transaction to the sub-account (confirmed against Monnify's own
+        # Transaction Splitting docs) -- feePercentage/feeBearer instead
+        # govern who bears *Monnify's own* processing fee, which stays on
+        # Kontributa's main account by default (confirmed with Monnify
+        # support: their fee is charged once, before the split, never a
+        # second time on settlement), so feeBearer is false and
+        # feePercentage is 0 for the sub-account.
+        #
+        # Kontributa's own cut is expressed as the *other* side of this same
+        # split -- the group's sub-account gets (100 - platform_fee_percent)%
+        # of the transaction, leaving the remainder on Kontributa's main
+        # account -- rather than a separate deduction, since Direct mode has
+        # no held balance to deduct from. Read fresh right here, at
+        # generation time, and stored on the contribution so an invoice
+        # already generated (and possibly already paid) never has its split
+        # retroactively changed by a later platform_fee_percent edit.
         income_split_config = None
+        platform_fee_percent_applied = None
         settlement = (
             await self.db.execute(select(SettlementAccount).where(SettlementAccount.group_id == purse.group_id))
         ).scalar_one_or_none()
         if settlement and settlement.settlement_mode == SettlementMode.DIRECT and settlement.direct_sub_account_code:
+            settings_row = await (platform_settings or PlatformSettingsService(self.db)).get_or_create()
+            platform_fee_percent_applied = settings_row.platform_fee_percent
             income_split_config = [
                 {
                     "subAccountCode": settlement.direct_sub_account_code,
-                    "feePercentage": 100,
+                    "feePercentage": 0,
+                    "splitPercentage": float(Decimal("100") - platform_fee_percent_applied),
                     "feeBearer": False,
                 }
             ]
@@ -441,6 +487,7 @@ class ContributionService:
         contribution.account_number = invoice.account_number
         contribution.bank_name = invoice.bank_name
         contribution.invoice_expires_at = invoice.expires_at
+        contribution.platform_fee_percent_applied = platform_fee_percent_applied
 
         if from_status == ContributionStatus.EXPIRED:
             await self._write_event(

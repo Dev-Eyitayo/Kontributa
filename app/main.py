@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 
+from app.core.csrf import CSRFMiddleware
 from app.core.exceptions import AppException
 from app.core.logging import configure_logging
 from app.core.response import error_response
@@ -40,6 +41,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Kontributa API", version="1.0.0", lifespan=lifespan)
+app.add_middleware(CSRFMiddleware)
 
 
 @app.exception_handler(AppException)

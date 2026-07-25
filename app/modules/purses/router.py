@@ -3,7 +3,7 @@ from typing import Optional, Union
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import (
@@ -23,6 +23,7 @@ from app.modules.contributions.service import ContributionService, compute_displ
 from app.modules.group_admins.service import GroupAdminService
 from app.modules.members.service import MemberService
 from app.modules.payouts.service import PayoutService
+from app.modules.purses.export import ExportFormat, build_export, content_type_for, export_filename
 from app.modules.purses.schemas import (
     AddMemberToPurseRequest,
     AddMemberToPurseResponse,
@@ -377,7 +378,38 @@ async def get_summary(
     await admin_service.get_admin_for_group(current_user.id, purse.group_id)
 
     summary = await contribution_service.summary_for_purse(purse_id)
-    return success_response({**summary, "total_collected": str(summary["total_collected"])})
+    return success_response(
+        {
+            **summary,
+            "total_collected": str(summary["total_collected"]),
+            "collected_via_kontributa": str(summary["collected_via_kontributa"]),
+            "collected_manually": str(summary["collected_manually"]),
+        }
+    )
+
+
+@router.get("/{purse_id}/export")
+async def export_purse(
+    purse_id: UUID,
+    format: ExportFormat = Query(...),
+    current_user: CurrentUser = Depends(get_current_group_admin_user),
+    purse_service: PurseService = Depends(get_purse_service),
+    admin_service: GroupAdminService = Depends(get_group_admin_service),
+    contribution_service: ContributionService = Depends(get_contribution_service),
+) -> Response:
+    purse = await purse_service.get_by_id(purse_id)
+    await admin_service.get_admin_for_group(current_user.id, purse.group_id)
+
+    contributions = await contribution_service.list_all_for_purse(purse_id)
+    summary = await contribution_service.summary_for_purse(purse_id)
+    body = build_export(format, purse, contributions, summary["total_collected"])
+
+    filename = export_filename(purse.title, format)
+    return Response(
+        content=body,
+        media_type=content_type_for(format),
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.get("/{purse_id}/available-balance", response_model=StandardResponse[AvailableBalanceOut])

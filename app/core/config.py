@@ -37,6 +37,15 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
     REFRESH_TOKEN_EXPIRE_DAYS: int = 30
 
+    # Production auth mode: off by default (today's behavior -- tokens in
+    # the JSON response body, read/stored by the frontend itself). When
+    # true, /auth/login and /auth/refresh-token set access_token and
+    # refresh_token as httpOnly cookies instead, and /auth/refresh-token
+    # and /auth/logout read the refresh token from the cookie rather than
+    # a request body field. Genuinely toggleable in either direction --
+    # not a one-way migration. See known-limitations.md.
+    USE_HTTPONLY_COOKIES: bool = False
+
     EMAIL_VERIFICATION_TOKEN_EXPIRE_MINUTES: int = 15
     PASSWORD_RESET_TOKEN_EXPIRE_MINUTES: int = 60
 

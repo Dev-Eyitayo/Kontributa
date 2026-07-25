@@ -43,6 +43,12 @@ class Member(Base):
     invite_source: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True), ForeignKey("invite_links.id"), nullable=True
     )
+    # Soft-delete only -- same convention as InviteLink.revoked_at. A
+    # Member row is never hard-deleted: it's the FK target of every
+    # Contribution the person ever made, and that financial/audit history
+    # must never be lost just because a platform admin later removes them
+    # from the group. None = still an active member of this group.
+    removed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(

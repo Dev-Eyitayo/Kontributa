@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,8 +13,10 @@ from app.core.auth import (
     get_password_reset_token_store,
     get_refresh_token_service,
 )
+from app.core.auth_cookies import REFRESH_TOKEN_COOKIE, clear_auth_cookies, set_auth_cookies, set_csrf_cookie
 from app.core.config import settings
 from app.core.db import get_db
+from app.core.exceptions import AuthError
 from app.core.ratelimit import rate_limit_by_ip
 from app.core.response import StandardResponse, success_response
 from app.modules.auth.schemas import (
@@ -130,24 +132,60 @@ async def get_me(
 @router.post("/login", response_model=StandardResponse[LoginResponse])
 async def login(payload: LoginRequest, service: AuthService = Depends(get_auth_service)) -> JSONResponse:
     access_token, refresh_token, role = await service.login(payload)
+
+    if settings.USE_HTTPONLY_COOKIES:
+        response = success_response({"role": role})
+        set_auth_cookies(response, access_token, refresh_token)
+        set_csrf_cookie(response)
+        return response
+
     return success_response({"access_token": access_token, "refresh_token": refresh_token, "role": role})
 
 
 @router.post("/refresh-token", response_model=StandardResponse[RefreshTokenResponse])
 async def refresh_token(
-    payload: RefreshTokenRequest, service: AuthService = Depends(get_auth_service)
+    request: Request,
+    payload: RefreshTokenRequest,
+    service: AuthService = Depends(get_auth_service),
 ) -> JSONResponse:
-    access_token, new_refresh_token = await service.refresh(payload)
+    if settings.USE_HTTPONLY_COOKIES:
+        refresh_token_value = request.cookies.get(REFRESH_TOKEN_COOKIE)
+    else:
+        refresh_token_value = payload.refresh_token
+
+    if not refresh_token_value:
+        raise AuthError("missing refresh token", code="missing_token")
+
+    access_token, new_refresh_token = await service.refresh(RefreshTokenRequest(refresh_token=refresh_token_value))
+
+    if settings.USE_HTTPONLY_COOKIES:
+        response = success_response({})
+        set_auth_cookies(response, access_token, new_refresh_token)
+        return response
+
     return success_response({"access_token": access_token, "refresh_token": new_refresh_token})
 
 
 @router.post("/logout", response_model=StandardResponse[LogoutResponse])
 async def logout(
+    request: Request,
     payload: LogoutRequest,
     current_user: CurrentUser = Depends(get_current_user),
     service: AuthService = Depends(get_auth_service),
 ) -> JSONResponse:
-    await service.logout(payload.refresh_token, current_user.jti, current_user.expires_at)
+    if settings.USE_HTTPONLY_COOKIES:
+        refresh_token_value = request.cookies.get(REFRESH_TOKEN_COOKIE)
+    else:
+        refresh_token_value = payload.refresh_token
+
+    if refresh_token_value:
+        await service.logout(refresh_token_value, current_user.jti, current_user.expires_at)
+
+    if settings.USE_HTTPONLY_COOKIES:
+        response = success_response({"logged_out": True})
+        clear_auth_cookies(response)
+        return response
+
     return success_response({"logged_out": True})
 
 

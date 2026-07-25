@@ -426,6 +426,84 @@ async def test_member_cannot_view_another_members_contribution(client, db_sessio
     assert resp.status_code == 403
 
 
+async def test_purse_summary_splits_collected_by_source(client, db_session):
+    """The purse overview needs to distinguish real, Monnify-confirmed
+    money (paid via webhook) from a rep's own offline/cash record
+    (mark-manual) -- collected_via_kontributa and collected_manually
+    should each reflect only their own source, while total_collected
+    stays their sum for existing progress displays."""
+    org, _existing_group = await create_org_and_group(db_session)
+    admin_token = await _register_and_login_group_admin(client)
+    admin_headers = {"Authorization": f"Bearer {admin_token}"}
+    group = await onboard_group_admin(client, db_session, org, admin_headers)
+
+    invite_a = await client.post(
+        f"/group-admins/invite-links?group_id={group.id}", json={"expires_in_days": 7}, headers=admin_headers
+    )
+    member_a_token = await _register_and_login_member(
+        client, invite_a.json()["data"]["token"], "kontributa-payer@example.com", first_name="Kay", last_name="One"
+    )
+    member_a_headers = {"Authorization": f"Bearer {member_a_token}"}
+
+    invite_b = await client.post(
+        f"/group-admins/invite-links?group_id={group.id}", json={"expires_in_days": 7}, headers=admin_headers
+    )
+    await _register_and_login_member(
+        client, invite_b.json()["data"]["token"], "manual-payer@example.com", first_name="Em", last_name="Two"
+    )
+
+    # Both members already exist when the purse is created, so a snapshot
+    # purse enrolls both of them.
+    create = await client.post(
+        "/purses",
+        json={
+            "group_id": str(group.id),
+            "title": "Mixed Sources Fee",
+            "amount": "1000.00",
+            "deadline": _future_deadline(),
+            "enroll_mode": "snapshot",
+        },
+        headers=admin_headers,
+    )
+    purse_id = create.json()["data"]["id"]
+
+    from app.modules.auth.models import User
+    from app.modules.members.models import Member
+
+    rows = (
+        await db_session.execute(
+            select(Contribution.id, User.email)
+            .join(Member, Contribution.member_id == Member.id)
+            .join(User, Member.user_id == User.id)
+            .where(Contribution.purse_id == purse_id)
+        )
+    ).all()
+    contribution_by_email = {email: str(cid) for cid, email in rows}
+
+    kontributa_contribution_id = contribution_by_email["kontributa-payer@example.com"]
+    await _generate_invoice(client, member_a_headers, kontributa_contribution_id)
+    result = await db_session.execute(select(Contribution).where(Contribution.id == kontributa_contribution_id))
+    invoice_id = result.scalar_one().invoice_id
+
+    body = _webhook_body(invoice_id, "1000.00")
+    webhook_resp = await client.post("/webhooks/monnify", content=body, headers={"monnify-signature": _sign(body)})
+    assert webhook_resp.status_code == 202
+
+    manual_resp = await client.post(
+        f"/contributions/{contribution_by_email['manual-payer@example.com']}/mark-manual",
+        json={"amount_received": "1000.00", "note": "paid cash at meeting"},
+        headers=admin_headers,
+    )
+    assert manual_resp.status_code == 200
+
+    summary = await client.get(f"/purses/{purse_id}/summary", headers=admin_headers)
+    assert summary.status_code == 200
+    data = summary.json()["data"]
+    assert data["collected_via_kontributa"] == "1000.00"
+    assert data["collected_manually"] == "1000.00"
+    assert data["total_collected"] == "2000.00"
+
+
 async def test_rep_cannot_view_contribution_outside_own_purses(client, db_session):
     ctx = await _setup_purse_with_member(client, db_session)
 

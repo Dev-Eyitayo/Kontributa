@@ -7,11 +7,12 @@ from typing import Optional
 from uuid import UUID, uuid4
 
 import jwt
-from fastapi import Depends
+from fastapi import Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.auth_cookies import ACCESS_TOKEN_COOKIE
 from app.core.config import settings
 from app.core.db import get_db
 from app.core.exceptions import AuthError, ForbiddenError
@@ -227,13 +228,24 @@ class CurrentUser:
 
 
 async def get_current_user(
+    request: Request,
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme),
     blacklist: AccessTokenBlacklist = Depends(get_access_token_blacklist),
 ) -> CurrentUser:
-    if credentials is None:
+    # Bearer header takes priority when present -- this keeps Bearer mode
+    # working completely unchanged. Only falls back to the httpOnly cookie
+    # when there's no header at all AND cookie mode is actually on, so
+    # this is a pure addition with zero behavior change while the flag is
+    # off (no login flow in that mode ever sets the cookie in the first
+    # place, so it would never be present anyway).
+    token = credentials.credentials if credentials is not None else None
+    if token is None and settings.USE_HTTPONLY_COOKIES:
+        token = request.cookies.get(ACCESS_TOKEN_COOKIE)
+
+    if token is None:
         raise AuthError("missing bearer token", code="missing_token")
 
-    payload = decode_access_token(credentials.credentials)
+    payload = decode_access_token(token)
     if await blacklist.is_blacklisted(payload["jti"]):
         raise AuthError("token has been revoked", code="token_revoked")
 

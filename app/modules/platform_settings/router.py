@@ -34,8 +34,8 @@ async def get_settings(
 @router.patch("/settings", response_model=StandardResponse[PlatformSettingsResponse])
 async def update_settings(
     payload: UpdatePlatformSettingsRequest,
-    _: CurrentUser = Depends(get_current_admin_user),
+    current_user: CurrentUser = Depends(get_current_admin_user),
     service: PlatformSettingsService = Depends(get_platform_settings_service),
 ) -> JSONResponse:
-    row = await service.update(payload)
+    row = await service.update(payload, current_user.id)
     return success_response(_settings_out(row))

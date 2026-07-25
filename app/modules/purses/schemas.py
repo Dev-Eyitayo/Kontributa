@@ -85,6 +85,11 @@ class PurseSummary(BaseModel):
     # Money is always a string on the wire (never a bare JSON number, to
     # avoid float precision loss) -- see known-limitations.md.
     total_collected: str
+    # total_collected split by source -- real, Monnify-confirmed money
+    # (collected_via_kontributa) vs. a rep's own offline/cash record
+    # (collected_manually), which they always sum back to total_collected.
+    collected_via_kontributa: str
+    collected_manually: str
     percent_complete: float
 
 

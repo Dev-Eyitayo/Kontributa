@@ -44,6 +44,13 @@ class Contribution(Base):
 
     amount_expected: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
     amount_received: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=0)
+    # PlatformSettings.platform_fee_percent as it stood at the moment this
+    # contribution's most recent invoice was generated -- locked in then,
+    # never retroactively updated by a later platform-fee change (see
+    # generate_invoice). Null for custodian-mode contributions (no split)
+    # and any invoice generated before this field existed. Audit/reporting
+    # only -- never read for a balance gate, since Direct mode has none.
+    platform_fee_percent_applied: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 2), nullable=True)
     status: Mapped[ContributionStatus] = mapped_column(
         Enum(ContributionStatus, name="contribution_status", values_callable=lambda e: [m.value for m in e]),
         nullable=False,

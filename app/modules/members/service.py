@@ -91,7 +91,7 @@ class MemberService:
             for member, group, org in result.all()
         ]
 
-    async def _validate_member_id_number(self, group_id: UUID, member_id_number: str | None) -> None:
+    async def validate_member_id_number(self, group_id: UUID, member_id_number: str | None) -> None:
         if member_id_number is None:
             return
         group = await self.db.get(Group, group_id)
@@ -120,7 +120,7 @@ class MemberService:
         resubmitted password."""
         invite, group, _organization, _purse_title = await self.invites.resolve(token)
 
-        await self._validate_member_id_number(group.id, payload.member_id_number)
+        await self.validate_member_id_number(group.id, payload.member_id_number)
 
         existing_user = await self._get_by_user_email(payload.email)
         if existing_user is not None:
@@ -191,7 +191,7 @@ class MemberService:
         token, not by a resubmitted email/password."""
         invite, group, _organization, _purse_title = await self.invites.resolve(token)
 
-        await self._validate_member_id_number(group.id, member_id_number)
+        await self.validate_member_id_number(group.id, member_id_number)
 
         existing = await self.get_by_user_and_group(user_id, invite.group_id)
         if existing is not None:
@@ -253,7 +253,7 @@ class MemberService:
             raise NotFoundError("member profile not found")
 
         if payload.member_id_number is not None:
-            await self._validate_member_id_number(member.group_id, payload.member_id_number)
+            await self.validate_member_id_number(member.group_id, payload.member_id_number)
             member.member_id_number = payload.member_id_number
         if payload.first_name is not None:
             user.first_name = payload.first_name

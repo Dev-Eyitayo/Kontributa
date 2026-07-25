@@ -45,3 +45,4 @@ class SwitchSettlementModeResponse(BaseModel):
 
 class SettlementOptionsResponse(BaseModel):
     custodian_mode_enabled: bool
+    platform_fee_percent: str

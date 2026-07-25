@@ -27,6 +27,7 @@ from app.modules.members.models import Member
 from app.modules.members.service import MemberService
 from app.modules.notifications.service import NotificationService, SendByteClient, get_sendbyte_client
 from app.modules.payments.service import MonnifyClient, get_monnify_client
+from app.modules.platform_settings.service import PlatformSettingsService
 from app.modules.purses.models import Purse
 
 router = APIRouter(prefix="/contributions", tags=["contributions"])
@@ -36,6 +37,10 @@ IDEMPOTENCY_SCOPE_MARK_MANUAL = "contributions:mark-manual"
 
 def get_contribution_service(db: AsyncSession = Depends(get_db)) -> ContributionService:
     return ContributionService(db)
+
+
+def get_platform_settings_service(db: AsyncSession = Depends(get_db)) -> PlatformSettingsService:
+    return PlatformSettingsService(db)
 
 
 def _contribution_out(c: Contribution, purse: Purse) -> dict:
@@ -101,6 +106,7 @@ async def generate_invoice(
     service: ContributionService = Depends(get_contribution_service),
     monnify: MonnifyClient = Depends(get_monnify_client),
     sendbyte: SendByteClient = Depends(get_sendbyte_client),
+    platform_settings: PlatformSettingsService = Depends(get_platform_settings_service),
 ) -> JSONResponse:
     if current_user.role != "member":
         raise ForbiddenError("only a member can generate an invoice for their own contribution")
@@ -114,7 +120,9 @@ async def generate_invoice(
         raise ForbiddenError("email verification required before paying", code="email_not_verified")
 
     notifications = NotificationService(db, sendbyte)
-    contribution = await service.generate_invoice(contribution, monnify, member, member_user, purse, notifications)
+    contribution = await service.generate_invoice(
+        contribution, monnify, member, member_user, purse, notifications, platform_settings
+    )
 
     return success_response(
         {

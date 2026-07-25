@@ -117,6 +117,85 @@ async def test_reconciliation_requires_admin(client, db_session):
     assert resp.status_code == 403
 
 
+async def test_display_status_reads_pending_for_expired_invoice_on_open_purse(client, db_session):
+    """A contribution whose invoice genuinely expired (via the
+    reconciliation job, not the transient expired-then-immediately-
+    regenerated blip inside generate-invoice) must still show as raw
+    status "expired" -- but every at-a-glance surface should read
+    display_status "pending" while the purse is still open, since the
+    member can regenerate and pay any time before it closes. The audit
+    trail must show the real transition regardless."""
+    ctx = await _setup_purse_with_member(client, db_session, amount="1500.00")
+    await _generate_invoice(client, ctx["member_headers"], ctx["contribution_id"])
+
+    from sqlalchemy import update
+
+    past_expiry = datetime.now(timezone.utc) - timedelta(minutes=1)
+    past_update = datetime.now(timezone.utc) - timedelta(hours=2)
+    await db_session.execute(
+        update(Contribution)
+        .where(Contribution.id == ctx["contribution_id"])
+        .values(invoice_expires_at=past_expiry, updated_at=past_update)
+    )
+    await db_session.commit()
+
+    admin_headers = await _admin_headers(db_session)
+    run = await client.post("/admin/reconciliation/run", headers=admin_headers)
+    assert run.status_code == 200
+    assert run.json()["data"] == {"checked": 1, "updated": 1}
+
+    result = await db_session.execute(select(Contribution).where(Contribution.id == ctx["contribution_id"]))
+    contribution = result.scalar_one()
+    assert contribution.status == ContributionStatus.EXPIRED
+
+    detail = await client.get(f"/contributions/{ctx['contribution_id']}", headers=ctx["member_headers"])
+    assert detail.json()["data"]["status"] == "expired"
+    assert detail.json()["data"]["display_status"] == "pending"
+
+    purse_as_member = await client.get(f"/purses/{ctx['purse_id']}", headers=ctx["member_headers"])
+    assert purse_as_member.json()["data"]["contribution_status"] == "expired"
+    assert purse_as_member.json()["data"]["display_status"] == "pending"
+
+    admin_contributions = await client.get(
+        f"/purses/{ctx['purse_id']}/contributions", headers=ctx["admin_headers"]
+    )
+    admin_item = admin_contributions.json()["data"]["items"][0]
+    assert admin_item["status"] == "expired"
+    assert admin_item["display_status"] == "pending"
+
+    transparency = await client.get(
+        f"/purses/{ctx['purse_id']}/member-contributions", headers=ctx["member_headers"]
+    )
+    transparency_item = transparency.json()["data"]["items"][0]
+    assert transparency_item["status"] == "expired"
+    assert transparency_item["display_status"] == "pending"
+
+    my_purses = await client.get("/members/me/purses", headers=ctx["member_headers"])
+    my_item = my_purses.json()["data"][0]
+    assert my_item["contribution_status"] == "expired"
+    assert my_item["display_status"] == "pending"
+
+    # The real pending -> expired transition (fired by the reconciliation
+    # job above) is still in the audit trail exactly as it happened --
+    # the display-layer distinction never touches this.
+    history = await client.get(
+        f"/contributions/{ctx['contribution_id']}/history", headers=ctx["admin_headers"]
+    )
+    transitions = [(e["from_status"], e["to_status"]) for e in history.json()["data"]["items"]]
+    assert ("pending", "expired") in transitions
+
+    # Once the purse itself closes, "expired" is no longer a fixable
+    # state -- display_status stops masking it and matches the raw value.
+    close = await client.post(f"/purses/{ctx['purse_id']}/close", headers=ctx["admin_headers"])
+    assert close.status_code == 200
+
+    detail_after_close = await client.get(
+        f"/contributions/{ctx['contribution_id']}", headers=ctx["member_headers"]
+    )
+    assert detail_after_close.json()["data"]["status"] == "expired"
+    assert detail_after_close.json()["data"]["display_status"] == "expired"
+
+
 async def test_admin_webhook_events_and_flagged_contributions(client, db_session):
     ctx = await _setup_purse_with_member(client, db_session, amount="2500.00")
     await _generate_invoice(client, ctx["member_headers"], ctx["contribution_id"])

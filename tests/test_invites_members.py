@@ -38,9 +38,16 @@ async def _create_invite_link(
     admin_token = await _register_and_login_group_admin(client, email=admin_email)
     headers = {"Authorization": f"Bearer {admin_token}"}
     group = await onboard_group_admin(client, db_session, org, headers, cohort=cohort)
+    # Cohort is inherited from the group, never a per-invite input (see
+    # PATCH /groups/{id}) -- set directly here since there's no API path to
+    # give a brand-new group a cohort at creation time.
+    if cohort is not None:
+        group.cohort = cohort
+        await db_session.commit()
+        await db_session.refresh(group)
     invite = await client.post(
         f"/group-admins/invite-links?group_id={group.id}",
-        json={"cohort": cohort, "expires_in_days": 7},
+        json={"expires_in_days": 7},
         headers=headers,
     )
     return invite.json()["data"]["token"], org, group
@@ -112,6 +119,13 @@ async def test_join_success_and_profile_get_update(client, db_session):
     me = await client.get("/members/me", headers=member_headers)
     assert me.status_code == 200
     assert me.json()["data"]["group"]["id"] == str(group.id)
+    # Confirmed bug: this member logged in successfully, which is only
+    # possible once /auth/verify-email has run -- is_verified must reflect
+    # that real state (verification_status is a separate, unused field
+    # that stays "pending" forever and must never be read as an email-
+    # verification signal).
+    assert me.json()["data"]["is_verified"] is True
+    assert me.json()["data"]["verification_status"] == "pending"
 
     update = await client.patch(
         "/members/me", json={"member_id_number": "21/CSC/9999"}, headers=member_headers

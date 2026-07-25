@@ -29,7 +29,6 @@ class InviteResolveResponse(BaseModel):
 
 
 class InviteLinkCreateRequest(BaseModel):
-    cohort: Optional[str] = None
     purse_id: Optional[UUID] = None
     expires_in_days: int
     max_uses: Optional[int] = None

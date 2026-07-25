@@ -19,6 +19,7 @@ from app.modules.contributions.models import Contribution
 from app.modules.contributions.service import ContributionService
 from app.modules.group_admins.models import GroupAdmin
 from app.modules.members.models import Member
+from app.modules.organizations.models import Group
 from app.modules.purses.models import Purse, PurseStatus
 from app.modules.purses.schemas import CreatePurseRequest, UpdatePurseRequest
 
@@ -46,9 +47,16 @@ class PurseService:
         if payload.deadline <= datetime.now(timezone.utc):
             raise ValidationAppError("deadline must be in the future", code="invalid_deadline")
 
+        group = await self.db.get(Group, admin.group_id)
+        if group is None:
+            raise NotFoundError("group not found")
+
         purse = Purse(
             group_id=admin.group_id,
-            cohort=payload.cohort if payload.cohort is not None else admin.cohort,
+            # Always the group's own cohort, set at creation time -- never
+            # an admin-supplied override (see docs on Group.cohort). No
+            # cohort set on the group is a valid, unremarkable state.
+            cohort=group.cohort,
             created_by_group_admin_id=admin.id,
             title=payload.title,
             amount=payload.amount,

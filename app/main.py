@@ -12,6 +12,7 @@ from app.modules.audit.router import router as audit_router
 from app.modules.auth.router import router as auth_router
 from app.modules.banks.router import router as banks_router
 from app.modules.contributions.router import router as contributions_router
+from app.modules.group_admins.router import groups_router
 from app.modules.group_admins.router import router as group_admins_router
 from app.modules.invites.router import router as invites_router
 from app.modules.jobs.scheduler import start_scheduler, stop_scheduler
@@ -74,6 +75,7 @@ app.include_router(auth_router)
 app.include_router(organizations_public_router)
 app.include_router(organizations_admin_router)
 app.include_router(group_admins_router)
+app.include_router(groups_router)
 app.include_router(invites_router)
 app.include_router(members_router)
 app.include_router(purses_router)

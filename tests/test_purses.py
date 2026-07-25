@@ -41,13 +41,20 @@ async def _setup_group_with_admin(client, db_session, cohort=None):
     admin_token = await _register_and_login_group_admin(client)
     headers = {"Authorization": f"Bearer {admin_token}"}
     group = await onboard_group_admin(client, db_session, org, headers, cohort=cohort)
+    # Cohort is inherited from the group, never a per-invite input -- set
+    # directly since there's no API path to give a brand-new group a
+    # cohort at creation time (see PATCH /groups/{id}).
+    if cohort is not None:
+        group.cohort = cohort
+        await db_session.commit()
+        await db_session.refresh(group)
     return org, group, headers
 
 
-async def _invite_and_join_member(client, headers, group_id, cohort=None, email="member1@example.com"):
+async def _invite_and_join_member(client, headers, group_id, email="member1@example.com"):
     invite = await client.post(
         f"/group-admins/invite-links?group_id={group_id}",
-        json={"cohort": cohort, "expires_in_days": 7},
+        json={"expires_in_days": 7},
         headers=headers,
     )
     token = invite.json()["data"]["token"]
@@ -96,6 +103,7 @@ async def test_create_purse_generates_pending_contributions_for_existing_members
         "name",
         "member_id_number",
         "status",
+        "display_status",
         "amount_received",
         "paid_at",
     }
@@ -539,16 +547,25 @@ async def test_add_member_to_purse_rejects_duplicate_enrollment(client, db_sessi
 
 
 async def test_add_member_to_purse_rejects_cohort_mismatch(client, db_session):
+    # Cohort mismatches now arise from the group's cohort changing over
+    # time, not a per-invite/per-purse override -- a member who joined
+    # under the old cohort keeps it (not retroactive), and a purse created
+    # after the change inherits the new one, so the two disagree.
     org, group, headers = await _setup_group_with_admin(client, db_session)
-    late_member_headers = await _invite_and_join_member(
-        client, headers, group.id, cohort="300", email="wrongcohort@example.com"
-    )
+
+    patch_300 = await client.patch(f"/groups/{group.id}", json={"cohort": "300"}, headers=headers)
+    assert patch_300.status_code == 200
+
+    late_member_headers = await _invite_and_join_member(client, headers, group.id, email="wrongcohort@example.com")
     member_me = await client.get("/members/me", headers=late_member_headers)
     member_id = member_me.json()["data"]["id"]
 
+    patch_400 = await client.patch(f"/groups/{group.id}", json={"cohort": "400"}, headers=headers)
+    assert patch_400.status_code == 200
+
     create = await client.post(
         "/purses",
-        json=_purse_payload(group.id, title="400L Dues", cohort="400"),
+        json=_purse_payload(group.id, title="400L Dues"),
         headers=headers,
     )
     purse_id = create.json()["data"]["id"]

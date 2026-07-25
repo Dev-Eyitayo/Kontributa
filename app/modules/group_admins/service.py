@@ -4,9 +4,10 @@ from typing import Optional
 from uuid import UUID
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.exceptions import ForbiddenError, NotFoundError
+from app.core.exceptions import ConflictError, ForbiddenError, NotFoundError
 from app.modules.auth.models import User
 from app.modules.group_admins.models import GroupAdmin
 from app.modules.group_admins.schemas import OnboardGroupAdminRequest
@@ -153,6 +154,52 @@ class GroupAdminService:
         purses_count = purses_count_result.scalar_one()
 
         return admin, user, group, members_count, purses_count
+
+    async def update_me(self, user_id: UUID, group_id: UUID, payload) -> tuple[GroupAdmin, User]:
+        """first_name/last_name only -- organization, group, and role are
+        never editable through this endpoint."""
+        admin = await self.get_admin_for_group(user_id, group_id)
+        user = await self.db.get(User, admin.user_id)
+        if user is None:
+            raise NotFoundError("group admin profile not found")
+
+        if payload.first_name is not None:
+            user.first_name = payload.first_name
+        if payload.last_name is not None:
+            user.last_name = payload.last_name
+
+        await self.db.commit()
+        await self.db.refresh(admin)
+        await self.db.refresh(user)
+        return admin, user
+
+    async def update_group(self, user_id: UUID, group_id: UUID, payload) -> Group:
+        """Only an existing active admin of this exact group. Changing
+        cohort here is NOT retroactive -- already-joined members and
+        already-created purses keep whatever cohort they had at the time;
+        only members who join, and purses created, after this call inherit
+        the new value (see Group.cohort)."""
+        await self.get_admin_for_group(user_id, group_id)
+        group = await self.db.get(Group, group_id)
+        if group is None:
+            raise NotFoundError("group not found")
+
+        if payload.name is not None:
+            group.name = payload.name
+        if payload.short_code is not None:
+            group.short_code = payload.short_code
+        if payload.cohort is not None:
+            group.cohort = payload.cohort
+
+        try:
+            await self.db.commit()
+        except IntegrityError:
+            await self.db.rollback()
+            raise ConflictError(
+                "another group in this organization already uses that short code", code="duplicate_short_code"
+            )
+        await self.db.refresh(group)
+        return group
 
     async def create_invite_link(self, user_id: UUID, group_id: UUID, payload) -> InviteLink:
         admin = await self.get_admin_for_group(user_id, group_id)

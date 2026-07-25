@@ -11,6 +11,9 @@ class ContributionDetailResponse(BaseModel):
     purse_id: UUID
     member_id: UUID
     status: str
+    # Display-layer only -- see compute_display_status's docstring. status
+    # above stays the real, unmassaged value.
+    display_status: str
     # Money is always a string on the wire (never a bare JSON number, to
     # avoid float precision loss) -- see known-limitations.md.
     amount_expected: str

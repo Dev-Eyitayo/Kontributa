@@ -79,7 +79,6 @@ class InviteService:
         invite = InviteLink(
             token=token,
             group_id=group_id,
-            cohort=payload.cohort,
             purse_id=payload.purse_id,
             created_by_group_admin_id=group_admin_id,
             expires_at=expires_at,

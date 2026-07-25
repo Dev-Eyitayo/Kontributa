@@ -21,6 +21,15 @@ class RegisterResponse(BaseModel):
     verification_required: bool = True
 
 
+class MeResponse(BaseModel):
+    id: UUID
+    email: EmailStr
+    first_name: str
+    last_name: str
+    role: str
+    is_platform_admin: bool
+
+
 class VerifyEmailRequest(BaseModel):
     email: EmailStr
     token: str

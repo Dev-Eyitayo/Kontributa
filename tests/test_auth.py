@@ -155,6 +155,28 @@ async def test_login_success_and_invalid_credentials(client):
     assert bad.json()["error"]["code"] == "invalid_credentials"
 
 
+async def test_get_me_returns_current_user(client):
+    await _register(client, email="meendpoint@example.com", password="password123")
+    verify_token = await find_redis_token("verify_email")
+    await client.post("/auth/verify-email", json={"email": "meendpoint@example.com", "token": verify_token})
+    login = await client.post(
+        "/auth/login", json={"email": "meendpoint@example.com", "password": "password123"}
+    )
+    headers = {"Authorization": f"Bearer {login.json()['data']['access_token']}"}
+
+    resp = await client.get("/auth/me", headers=headers)
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    assert data["email"] == "meendpoint@example.com"
+    assert data["first_name"] == "Ada"
+    assert data["last_name"] == "Lovelace"
+    assert data["role"] == "member"
+    assert data["is_platform_admin"] is False
+
+    unauth = await client.get("/auth/me")
+    assert unauth.status_code == 401
+
+
 async def test_unverified_account_cannot_log_in_group_admin_or_member(client):
     # Applies uniformly to both roles -- verification isn't role-specific.
     await _register(client, email="unverified-admin@example.com", role="group_admin", password="password123")

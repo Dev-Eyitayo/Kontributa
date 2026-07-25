@@ -27,6 +27,23 @@ _AUDIT_ACTOR_MAP = {
 }
 
 
+def compute_display_status(contribution_status: str, purse_status: str) -> str:
+    """Display-layer only -- never write this back anywhere. The stored
+    Contribution.status and its ContributionEvent history keep recording
+    the real pending -> expired (-> pending, on regeneration) transition
+    exactly as it happened; this is purely what an at-a-glance badge
+    should show. An expired invoice on a purse that's still open is
+    functionally "pending" from the member's perspective -- they can
+    regenerate and pay any time before the purse actually closes, so
+    showing a bare "Expired" there reads as terminal when it isn't. Once
+    the purse itself has closed, or for every other status, the raw
+    value is already accurate and passes through unchanged.
+    """
+    if contribution_status == ContributionStatus.EXPIRED.value and purse_status == PurseStatus.OPEN.value:
+        return ContributionStatus.PENDING.value
+    return contribution_status
+
+
 class ContributionService:
     def __init__(self, db: AsyncSession):
         self.db = db
@@ -340,6 +357,12 @@ class ContributionService:
         contribution = await self.expire_if_needed(contribution, notifications)
 
         now = datetime.now(timezone.utc)
+        if purse.status != PurseStatus.OPEN or purse.deadline <= now:
+            raise BusinessRuleError(
+                "this purse is no longer open for contributions",
+                code="purse_closed",
+            )
+
         has_live_invoice = (
             contribution.status == ContributionStatus.PENDING
             and contribution.account_number is not None

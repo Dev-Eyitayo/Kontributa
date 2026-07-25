@@ -20,7 +20,7 @@ async def resolve_invite(token: str, service: InviteService = Depends(get_invite
     return success_response(
         {
             "group": {"id": str(group.id), "name": group.name, "short_code": group.short_code},
-            "cohort": invite.cohort,
+            "cohort": group.cohort,
             "organization": {
                 "id": str(organization.id),
                 "name": organization.name,

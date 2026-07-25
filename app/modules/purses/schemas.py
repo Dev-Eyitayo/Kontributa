@@ -27,7 +27,6 @@ class CreatePurseRequest(BaseModel):
     title: str = Field(min_length=1, max_length=255)
     amount: Decimal = Field(gt=0)
     deadline: datetime
-    cohort: Optional[str] = None
     enroll_mode: EnrollModeLiteral
 
     _normalize_deadline = field_validator("deadline")(_assume_utc_if_naive)
@@ -58,6 +57,9 @@ class ContributionListItem(BaseModel):
     name: str
     member_id_number: Optional[str] = None
     status: str
+    # Display-layer only -- see compute_display_status's docstring. status
+    # above stays the real, unmassaged value.
+    display_status: str
     # Money is always a string on the wire (never a bare JSON number, to
     # avoid float precision loss) -- see known-limitations.md.
     amount_received: str
@@ -72,6 +74,7 @@ class MemberVisibleContributionItem(BaseModel):
 
     name: str
     status: str
+    display_status: str
 
 
 class PurseSummary(BaseModel):
@@ -122,6 +125,9 @@ class PurseDetailAdminOut(PurseOut):
 class PurseDetailMemberOut(PurseOut):
     enroll_mode: EnrollModeLiteral
     contribution_status: str
+    # Display-layer only -- see compute_display_status's docstring.
+    # contribution_status above stays the real, unmassaged value.
+    display_status: str
 
 
 class PurseUpdateResponse(BaseModel):

@@ -14,7 +14,7 @@ from app.core.auth import (
 )
 from app.core.db import get_db
 from app.core.response import StandardResponse, success_response
-from app.modules.contributions.service import ContributionService
+from app.modules.contributions.service import ContributionService, compute_display_status
 from app.modules.members.schemas import (
     JoinAdditionalGroupRequest,
     JoinRequest,
@@ -114,6 +114,7 @@ async def get_me(
             "last_name": user.last_name,
             "group": {"id": str(group.id), "name": group.name, "short_code": group.short_code},
             "cohort": member.cohort,
+            "is_verified": user.is_verified,
             "verification_status": member.verification_status.value,
             "member_id_number": member.member_id_number,
         }
@@ -155,6 +156,7 @@ async def list_my_purses(
                 "amount": str(purse.amount),
                 "deadline": purse.deadline.isoformat(),
                 "contribution_status": contribution.status.value,
+                "display_status": compute_display_status(contribution.status.value, purse.status.value),
                 "group": {"id": str(group.id), "name": group.name, "short_code": group.short_code},
             }
             for contribution, purse, group in rows

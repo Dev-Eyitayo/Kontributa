@@ -42,6 +42,152 @@ async def test_onboard_success_and_me(client, db_session):
     assert me.status_code == 200
     assert me.json()["data"]["group"]["name"] == "400L Software Engineering"
     assert me.json()["data"]["members_count"] == 0
+    # Logging in at all requires a verified email -- confirms /group-admins/me
+    # carries the same real signal /members/me does (see the Part 1 bug fix).
+    assert me.json()["data"]["is_verified"] is True
+
+
+async def test_update_group_admin_me_edits_name_only(client, db_session):
+    org, _existing_group = await create_org_and_group(db_session)
+    headers = await _register_and_login_group_admin(client)
+    onboard = await client.post(
+        "/group-admins/onboard",
+        json={"organization_id": str(org.id), "new_group_name": "Edit Me Group"},
+        headers=headers,
+    )
+    group_id = onboard.json()["data"]["group_id"]
+
+    update = await client.patch(
+        f"/group-admins/me?group_id={group_id}",
+        json={"first_name": "Tunde", "last_name": "Admin"},
+        headers=headers,
+    )
+    assert update.status_code == 200
+    assert update.json()["data"]["first_name"] == "Tunde"
+    assert update.json()["data"]["last_name"] == "Admin"
+
+    me = await client.get(f"/group-admins/me?group_id={group_id}", headers=headers)
+    assert me.json()["data"]["first_name"] == "Tunde"
+    assert me.json()["data"]["last_name"] == "Admin"
+    # Group/org/role were never part of the request -- confirms nothing
+    # about the group itself moved through this endpoint.
+    assert me.json()["data"]["group"]["name"] == "Edit Me Group"
+
+
+async def test_update_group_rejects_non_admin_of_that_group(client, db_session):
+    org, _existing_group = await create_org_and_group(db_session)
+    headers = await _register_and_login_group_admin(client, email="owner@example.com")
+    onboard = await client.post(
+        "/group-admins/onboard",
+        json={"organization_id": str(org.id), "new_group_name": "Owned Group"},
+        headers=headers,
+    )
+    group_id = onboard.json()["data"]["group_id"]
+
+    outsider_headers = await _register_and_login_group_admin(client, email="outsider@example.com")
+    await client.post(
+        "/group-admins/onboard",
+        json={"organization_id": str(org.id), "new_group_name": "Outsider's Own Group"},
+        headers=outsider_headers,
+    )
+
+    resp = await client.patch(
+        f"/groups/{group_id}", json={"name": "Hijacked"}, headers=outsider_headers
+    )
+    assert resp.status_code == 403
+
+
+async def test_update_group_sets_cohort_not_retroactive(client, db_session):
+    """Changing a group's cohort only affects members who join, and purses
+    created, after the change -- an already-joined member and an
+    already-created purse keep whatever cohort they had at the time."""
+    from tests.conftest import find_redis_token
+
+    org, _existing_group = await create_org_and_group(db_session)
+    headers = await _register_and_login_group_admin(client)
+    onboard = await client.post(
+        "/group-admins/onboard",
+        json={"organization_id": str(org.id), "new_group_name": "Cohort Group"},
+        headers=headers,
+    )
+    group_id = onboard.json()["data"]["group_id"]
+
+    # No cohort set yet -- a member who joins now gets none.
+    invite_before = await client.post(
+        f"/group-admins/invite-links?group_id={group_id}", json={"expires_in_days": 7}, headers=headers
+    )
+    token_before = invite_before.json()["data"]["token"]
+    await client.post(
+        f"/members/join/{token_before}",
+        json={"email": "early@example.com", "password": "password123", "first_name": "Early", "last_name": "Bird"},
+    )
+    early_verify = await find_redis_token("verify_email")
+    await client.post("/auth/verify-email", json={"email": "early@example.com", "token": early_verify})
+    early_login = await client.post(
+        "/auth/login", json={"email": "early@example.com", "password": "password123"}
+    )
+    early_headers = {"Authorization": f"Bearer {early_login.json()['data']['access_token']}"}
+
+    # Purse created now (still cohort-less) -- created before the change too.
+    # Purse.cohort isn't exposed in any purse API response, so read it
+    # straight from the DB rather than expanding that schema for this test.
+    from uuid import UUID as _UUID
+
+    from sqlalchemy import select as _select
+
+    from app.modules.purses.models import Purse as _Purse
+
+    early_purse_deadline = "2099-01-01T00:00:00+00:00"
+    early_purse = await client.post(
+        "/purses",
+        json={
+            "group_id": group_id,
+            "title": "Before Cohort",
+            "amount": "100.00",
+            "deadline": early_purse_deadline,
+            "enroll_mode": "snapshot",
+        },
+        headers=headers,
+    )
+    early_purse_id = early_purse.json()["data"]["id"]
+    early_purse_row = await db_session.get(_Purse, _UUID(early_purse_id))
+    assert early_purse_row.cohort is None
+
+    patch = await client.patch(f"/groups/{group_id}", json={"cohort": "500L"}, headers=headers)
+    assert patch.status_code == 200
+    assert patch.json()["data"]["cohort"] == "500L"
+
+    # The already-joined member and already-created purse are untouched.
+    early_me = await client.get("/members/me", headers=early_headers)
+    assert early_me.json()["data"]["cohort"] is None
+
+    await db_session.refresh(early_purse_row)
+    assert early_purse_row.cohort is None
+
+    # A member who joins, and a purse created, after the change inherit it.
+    invite_after = await client.post(
+        f"/group-admins/invite-links?group_id={group_id}", json={"expires_in_days": 7}, headers=headers
+    )
+    token_after = invite_after.json()["data"]["token"]
+    join_after = await client.post(
+        f"/members/join/{token_after}",
+        json={"email": "late@example.com", "password": "password123", "first_name": "Late", "last_name": "Comer"},
+    )
+    assert join_after.json()["data"]["cohort"] == "500L"
+
+    late_purse = await client.post(
+        "/purses",
+        json={
+            "group_id": group_id,
+            "title": "After Cohort",
+            "amount": "100.00",
+            "deadline": early_purse_deadline,
+            "enroll_mode": "snapshot",
+        },
+        headers=headers,
+    )
+    late_purse_row = await db_session.get(_Purse, _UUID(late_purse.json()["data"]["id"]))
+    assert late_purse_row.cohort == "500L"
 
 
 async def test_onboard_never_grants_control_of_an_existing_group(client, db_session):

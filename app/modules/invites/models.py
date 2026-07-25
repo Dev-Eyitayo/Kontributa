@@ -18,7 +18,6 @@ class InviteLink(Base):
     group_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("groups.id"), nullable=False, index=True
     )
-    cohort: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
 
     purse_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True), ForeignKey("purses.id"), nullable=True

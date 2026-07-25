@@ -11,6 +11,10 @@ from app.core.pagination import DEFAULT_LIMIT, MAX_LIMIT, Paginated
 from app.core.response import StandardResponse, success_response
 from app.modules.group_admins.schemas import (
     GroupAdminMeResponse,
+    GroupAdminUpdateRequest,
+    GroupAdminUpdateResponse,
+    GroupUpdateRequest,
+    GroupUpdateResponse,
     MemberListItem,
     MyGroupListItem,
     OnboardGroupAdminRequest,
@@ -22,6 +26,7 @@ from app.modules.invites.schemas import InviteLinkCreateRequest, InviteLinkCreat
 from app.modules.invites.service import InviteService
 
 router = APIRouter(prefix="/group-admins", tags=["group-admins"])
+groups_router = APIRouter(prefix="/groups", tags=["groups"])
 
 
 def get_group_admin_service(db: AsyncSession = Depends(get_db)) -> GroupAdminService:
@@ -87,9 +92,36 @@ async def get_me(
             "last_name": user.last_name,
             "group": {"id": str(group.id), "name": group.name, "short_code": group.short_code},
             "cohort": admin.cohort,
+            "is_verified": user.is_verified,
             "purses_count": purses_count,
             "members_count": members_count,
         }
+    )
+
+
+@router.patch("/me", response_model=StandardResponse[GroupAdminUpdateResponse])
+async def update_me(
+    payload: GroupAdminUpdateRequest,
+    group_id: UUID = Query(...),
+    current_user: CurrentUser = Depends(get_current_group_admin_user),
+    service: GroupAdminService = Depends(get_group_admin_service),
+) -> JSONResponse:
+    admin, user = await service.update_me(current_user.id, group_id, payload)
+    return success_response(
+        {"id": str(admin.id), "first_name": user.first_name, "last_name": user.last_name}
+    )
+
+
+@groups_router.patch("/{group_id}", response_model=StandardResponse[GroupUpdateResponse])
+async def update_group(
+    group_id: UUID,
+    payload: GroupUpdateRequest,
+    current_user: CurrentUser = Depends(get_current_group_admin_user),
+    service: GroupAdminService = Depends(get_group_admin_service),
+) -> JSONResponse:
+    group = await service.update_group(current_user.id, group_id, payload)
+    return success_response(
+        {"id": str(group.id), "name": group.name, "short_code": group.short_code, "cohort": group.cohort}
     )
 
 

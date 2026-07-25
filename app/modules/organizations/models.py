@@ -49,6 +49,13 @@ class Group(Base):
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     short_code: Mapped[str] = mapped_column(String(50), nullable=False)
+    # The single source of truth for cohort, inherited automatically by
+    # every Member who joins and every Purse created after this is set --
+    # never a per-invite or per-purse override. Changing it is NOT
+    # retroactive: already-joined members and already-created purses keep
+    # whatever cohort they had at the time (same immutability principle as
+    # a purse amount edit not touching already-paid contributions).
+    cohort: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(

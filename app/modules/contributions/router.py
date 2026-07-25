@@ -21,7 +21,7 @@ from app.modules.contributions.schemas import (
     ResolveFlagRequest,
     ResolveFlagResponse,
 )
-from app.modules.contributions.service import ContributionService
+from app.modules.contributions.service import ContributionService, compute_display_status
 from app.modules.group_admins.service import GroupAdminService
 from app.modules.members.models import Member
 from app.modules.members.service import MemberService
@@ -38,12 +38,15 @@ def get_contribution_service(db: AsyncSession = Depends(get_db)) -> Contribution
     return ContributionService(db)
 
 
-def _contribution_out(c: Contribution) -> dict:
+def _contribution_out(c: Contribution, purse: Purse) -> dict:
     return {
         "id": str(c.id),
         "purse_id": str(c.purse_id),
         "member_id": str(c.member_id),
         "status": c.status.value,
+        # Display-layer only -- see compute_display_status's docstring.
+        # status above stays the real, unmassaged value.
+        "display_status": compute_display_status(c.status.value, purse.status.value),
         "amount_expected": str(c.amount_expected),
         "amount_received": str(c.amount_received),
         "account_number": c.account_number,
@@ -82,11 +85,12 @@ async def get_contribution(
     contribution = await service.get_by_id(contribution_id)
 
     if current_user.role == "group_admin":
-        await _assert_admin_owns(db, current_user, contribution)
+        _admin, purse = await _assert_admin_owns(db, current_user, contribution)
     else:
         await _assert_member_owns(db, current_user, contribution)
+        purse = await db.get(Purse, contribution.purse_id)
 
-    return success_response(_contribution_out(contribution))
+    return success_response(_contribution_out(contribution, purse))
 
 
 @router.post("/{contribution_id}/generate-invoice", response_model=StandardResponse[GenerateInvoiceResponse])

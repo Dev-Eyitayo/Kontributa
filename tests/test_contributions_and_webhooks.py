@@ -8,6 +8,7 @@ from sqlalchemy import select
 
 from app.core.config import settings
 from app.modules.contributions.models import Contribution
+from app.modules.purses.models import Purse
 from tests.conftest import _state, create_org_and_group, find_redis_token, onboard_group_admin
 
 
@@ -145,6 +146,28 @@ async def test_generate_invoice_regenerates_after_expiry(client, db_session):
     assert body["total"] == 2
     assert body["limit"] == 1
     assert len(body["items"]) == 1
+
+
+async def test_generate_invoice_rejected_once_purse_deadline_passed(client, db_session):
+    ctx = await _setup_purse_with_member(client, db_session)
+
+    # Expire the invoice AND push the purse's own deadline into the past --
+    # regeneration must stop once the purse itself is no longer open, not
+    # just because the previous invoice expired.
+    result = await db_session.execute(select(Contribution).where(Contribution.id == ctx["contribution_id"]))
+    contribution = result.scalar_one()
+    contribution.invoice_expires_at = datetime.now(timezone.utc) - timedelta(minutes=1)
+    await db_session.commit()
+
+    purse = await db_session.get(Purse, ctx["purse_id"])
+    purse.deadline = datetime.now(timezone.utc) - timedelta(minutes=1)
+    await db_session.commit()
+
+    resp = await client.post(
+        f"/contributions/{ctx['contribution_id']}/generate-invoice", headers=ctx["member_headers"]
+    )
+    assert resp.status_code == 422
+    assert resp.json()["error"]["code"] == "purse_closed"
 
 
 async def test_webhook_wrong_signature_rejected(client, db_session):

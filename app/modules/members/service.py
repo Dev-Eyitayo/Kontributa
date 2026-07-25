@@ -139,7 +139,7 @@ class MemberService:
         member = Member(
             user_id=user.id,
             group_id=invite.group_id,
-            cohort=invite.cohort,
+            cohort=group.cohort,
             member_id_number=payload.member_id_number,
             verification_status=VerificationStatus.PENDING,
             invite_source=invite.id,
@@ -200,7 +200,7 @@ class MemberService:
         member = Member(
             user_id=user_id,
             group_id=invite.group_id,
-            cohort=invite.cohort,
+            cohort=group.cohort,
             member_id_number=member_id_number,
             verification_status=VerificationStatus.PENDING,
             invite_source=invite.id,

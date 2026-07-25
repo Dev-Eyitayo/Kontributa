@@ -19,7 +19,7 @@ from app.core.idempotency import IdempotencyStore, fingerprint, get_idempotency_
 from app.core.pagination import DEFAULT_LIMIT, MAX_LIMIT, Paginated
 from app.core.response import StandardResponse, success_response
 from app.modules.auth.models import User
-from app.modules.contributions.service import ContributionService
+from app.modules.contributions.service import ContributionService, compute_display_status
 from app.modules.group_admins.service import GroupAdminService
 from app.modules.members.service import MemberService
 from app.modules.payouts.service import PayoutService
@@ -224,6 +224,7 @@ async def get_purse(
             **_purse_out(purse),
             "enroll_mode": purse.enroll_mode.value,
             "contribution_status": contribution.status.value,
+            "display_status": compute_display_status(contribution.status.value, purse.status.value),
         }
     )
 
@@ -289,6 +290,7 @@ async def list_contributions(
                     "name": f"{user.first_name} {user.last_name}",
                     "member_id_number": member.member_id_number,
                     "status": contribution.status.value,
+                    "display_status": compute_display_status(contribution.status.value, purse.status.value),
                     "amount_received": str(contribution.amount_received),
                     "paid_at": contribution.paid_at.isoformat() if contribution.paid_at else None,
                 }
@@ -326,7 +328,11 @@ async def list_contributions_for_member(
     return success_response(
         {
             "items": [
-                {"name": f"{user.first_name} {user.last_name}", "status": contribution.status.value}
+                {
+                    "name": f"{user.first_name} {user.last_name}",
+                    "status": contribution.status.value,
+                    "display_status": compute_display_status(contribution.status.value, purse.status.value),
+                }
                 for contribution, _member, user in rows
             ],
             "total": total,

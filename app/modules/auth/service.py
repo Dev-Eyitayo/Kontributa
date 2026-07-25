@@ -44,6 +44,12 @@ class AuthService:
         result = await self.db.execute(select(User).where(User.email == email))
         return result.scalar_one_or_none()
 
+    async def get_me(self, user_id: UUID) -> User:
+        user = await self.db.get(User, user_id)
+        if user is None:
+            raise NotFoundError("user not found")
+        return user
+
     async def register(self, payload: RegisterRequest) -> User:
         existing = await self._get_by_email(payload.email)
         if existing is not None:

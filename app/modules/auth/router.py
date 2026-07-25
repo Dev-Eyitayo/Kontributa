@@ -24,6 +24,7 @@ from app.modules.auth.schemas import (
     LoginResponse,
     LogoutRequest,
     LogoutResponse,
+    MeResponse,
     RefreshTokenRequest,
     RefreshTokenResponse,
     RegisterRequest,
@@ -106,6 +107,24 @@ async def resend_verification(
 ) -> JSONResponse:
     await service.resend_verification(payload.email)
     return success_response({"message": "verification email sent if account exists and is unverified"})
+
+
+@router.get("/me", response_model=StandardResponse[MeResponse])
+async def get_me(
+    current_user: CurrentUser = Depends(get_current_user),
+    service: AuthService = Depends(get_auth_service),
+) -> JSONResponse:
+    user = await service.get_me(current_user.id)
+    return success_response(
+        {
+            "id": str(user.id),
+            "email": user.email,
+            "first_name": user.first_name,
+            "last_name": user.last_name,
+            "role": user.role.value,
+            "is_platform_admin": user.is_platform_admin,
+        }
+    )
 
 
 @router.post("/login", response_model=StandardResponse[LoginResponse])

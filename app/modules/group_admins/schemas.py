@@ -48,8 +48,33 @@ class GroupAdminMeResponse(BaseModel):
     last_name: str
     group: GroupBrief
     cohort: Optional[str] = None
+    is_verified: bool
     purses_count: int
     members_count: int
+
+
+class GroupAdminUpdateRequest(BaseModel):
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+
+
+class GroupAdminUpdateResponse(BaseModel):
+    id: UUID
+    first_name: str
+    last_name: str
+
+
+class GroupUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    short_code: Optional[str] = None
+    cohort: Optional[str] = None
+
+
+class GroupUpdateResponse(BaseModel):
+    id: UUID
+    name: str
+    short_code: str
+    cohort: Optional[str] = None
 
 
 class InviteSourceSummary(BaseModel):

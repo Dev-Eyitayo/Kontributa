@@ -21,12 +21,16 @@ async def resolve_invite(token: str, service: InviteService = Depends(get_invite
         {
             "group": {"id": str(group.id), "name": group.name, "short_code": group.short_code},
             "cohort": group.cohort,
-            "organization": {
-                "id": str(organization.id),
-                "name": organization.name,
-                "short_code": organization.short_code,
-                "member_id_format": organization.member_id_format,
-            },
+            "organization": (
+                {
+                    "id": str(organization.id),
+                    "name": organization.name,
+                    "short_code": organization.short_code,
+                    "member_id_format": organization.member_id_format,
+                }
+                if organization is not None
+                else None
+            ),
             "purse_title": purse_title,
         }
     )

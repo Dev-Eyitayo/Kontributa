@@ -38,13 +38,19 @@ async def _create_invite_link(
     admin_token = await _register_and_login_group_admin(client, email=admin_email)
     headers = {"Authorization": f"Bearer {admin_token}"}
     group = await onboard_group_admin(client, db_session, org, headers, cohort=cohort)
+    # Onboarding never associates a Group with an Organization anymore
+    # (see GroupAdminService.onboard) -- set directly here, same as the
+    # cohort workaround below, since there's no API path for it. Mirrors
+    # how a real org-linked group would only ever come from the
+    # Platform Admin's own POST /admin/groups.
+    group.organization_id = org.id
     # Cohort is inherited from the group, never a per-invite input (see
     # PATCH /groups/{id}) -- set directly here since there's no API path to
     # give a brand-new group a cohort at creation time.
     if cohort is not None:
         group.cohort = cohort
-        await db_session.commit()
-        await db_session.refresh(group)
+    await db_session.commit()
+    await db_session.refresh(group)
     invite = await client.post(
         f"/group-admins/invite-links?group_id={group.id}",
         json={"expires_in_days": 7},
@@ -57,6 +63,44 @@ async def test_resolve_unknown_invite_returns_404(client, db_session):
     resp = await client.get(f"/invites/{uuid.uuid4().hex}")
     assert resp.status_code == 404
     assert resp.json()["error"]["code"] == "not_found"
+
+
+async def test_resolve_invite_for_orgless_group_has_null_organization(client, db_session):
+    """The realistic new default: a Group Admin's own onboarding never
+    associates a Group with an Organization at all (see
+    GroupAdminService.onboard) -- unlike _create_invite_link's other
+    callers, this deliberately skips wiring one up, to cover the actual
+    default path a real new admin goes through."""
+    admin_token = await _register_and_login_group_admin(client, email="orgless-rep@example.com")
+    headers = {"Authorization": f"Bearer {admin_token}"}
+    onboard = await client.post(
+        "/group-admins/onboard", json={"new_group_name": "Orgless Group"}, headers=headers
+    )
+    assert onboard.status_code == 201
+    group_id = onboard.json()["data"]["group_id"]
+
+    invite = await client.post(
+        f"/group-admins/invite-links?group_id={group_id}", json={"expires_in_days": 7}, headers=headers
+    )
+    token = invite.json()["data"]["token"]
+
+    resp = await client.get(f"/invites/{token}")
+    assert resp.status_code == 200
+    body = resp.json()["data"]
+    assert body["group"]["name"] == "Orgless Group"
+    assert body["organization"] is None
+
+    join = await client.post(
+        f"/members/join/{token}",
+        json={
+            "email": "orgless-member@example.com",
+            "password": "password123",
+            "first_name": "No",
+            "last_name": "Org",
+            "member_id_number": "anything-goes-here",
+        },
+    )
+    assert join.status_code == 201, join.text
 
 
 async def test_resolve_invite_success(client, db_session):

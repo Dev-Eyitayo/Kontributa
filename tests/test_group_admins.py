@@ -215,14 +215,26 @@ async def test_onboard_never_grants_control_of_an_existing_group(client, db_sess
     assert me.status_code == 403
 
 
-async def test_onboard_with_unknown_organization_404s(client, db_session):
+async def test_onboard_ignores_organization_id_and_creates_orgless_group(client, db_session):
+    """Organization is a Platform-Admin-only concept from the Group Admin
+    side now (see Group.organization_id) -- onboarding never references
+    one at all, not even to validate a passed-in id. Sending one
+    (a real one, an unknown one, garbage) has zero effect either way."""
+    from uuid import UUID
+
+    from app.modules.organizations.models import Group
+
     headers = await _register_and_login_group_admin(client)
     resp = await client.post(
         "/group-admins/onboard",
         json={"organization_id": str(uuid.uuid4()), "new_group_name": "Ghost Org Group"},
         headers=headers,
     )
-    assert resp.status_code == 404
+    assert resp.status_code == 201, resp.text
+
+    group = await db_session.get(Group, UUID(resp.json()["data"]["group_id"]))
+    assert group is not None
+    assert group.organization_id is None
 
 
 async def test_onboard_twice_creates_two_distinct_groups(client, db_session):

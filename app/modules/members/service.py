@@ -72,9 +72,8 @@ class MemberService:
         so a member in two groups can have two different id numbers on
         file, one per group."""
         result = await self.db.execute(
-            select(Member, Group, Organization)
+            select(Member, Group)
             .join(Group, Member.group_id == Group.id)
-            .join(Organization, Group.organization_id == Organization.id)
             .where(Member.user_id == user_id)
             .order_by(Member.created_at)
         )
@@ -83,12 +82,10 @@ class MemberService:
                 "id": group.id,
                 "name": group.name,
                 "short_code": group.short_code,
-                "organization_id": org.id,
-                "organization_name": org.name,
                 "cohort": member.cohort,
                 "member_id_number": member.member_id_number,
             }
-            for member, group, org in result.all()
+            for member, group in result.all()
         ]
 
     async def validate_member_id_number(self, group_id: UUID, member_id_number: str | None) -> None:
@@ -97,7 +94,9 @@ class MemberService:
         group = await self.db.get(Group, group_id)
         if group is None:
             raise NotFoundError("group not found")
-        organization = await self.db.get(Organization, group.organization_id)
+        # Most groups have no Organization at all now (see
+        # Group.organization_id) -- no format to enforce in that case.
+        organization = await self.db.get(Organization, group.organization_id) if group.organization_id else None
         if organization is None or not organization.member_id_format:
             return
         if not re.match(organization.member_id_format, member_id_number):

@@ -33,8 +33,6 @@ class MyMemberGroupItem(BaseModel):
     id: UUID
     name: str
     short_code: str
-    organization_id: UUID
-    organization_name: str
     cohort: Optional[str] = None
     # Per (user, group), never global -- a member in two groups can have
     # two different id numbers on file.

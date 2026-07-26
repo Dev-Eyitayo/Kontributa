@@ -90,8 +90,6 @@ async def list_my_groups(
                 "id": str(g["id"]),
                 "name": g["name"],
                 "short_code": g["short_code"],
-                "organization_id": str(g["organization_id"]),
-                "organization_name": g["organization_name"],
                 "cohort": g["cohort"],
                 "member_id_number": g["member_id_number"],
             }

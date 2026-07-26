@@ -31,7 +31,7 @@ class InviteService:
         maxed_out = invite.max_uses is not None and invite.used_count >= invite.max_uses
         return expired or maxed_out
 
-    async def resolve(self, token: str) -> tuple[InviteLink, Group, Organization, Optional[str]]:
+    async def resolve(self, token: str) -> tuple[InviteLink, Group, Optional[Organization], Optional[str]]:
         invite = await self._get_active(token)
         if self._is_exhausted(invite):
             raise GoneError("invite link has expired or been fully used", code="invite_exhausted")
@@ -39,9 +39,9 @@ class InviteService:
         group = await self.db.get(Group, invite.group_id)
         if group is None:
             raise NotFoundError("group not found")
-        organization = await self.db.get(Organization, group.organization_id)
-        if organization is None:
-            raise NotFoundError("organization not found")
+        # Most groups have no Organization at all now (see
+        # Group.organization_id) -- that's expected, not an error.
+        organization = await self.db.get(Organization, group.organization_id) if group.organization_id else None
 
         purse_title = None
         if invite.purse_id is not None:

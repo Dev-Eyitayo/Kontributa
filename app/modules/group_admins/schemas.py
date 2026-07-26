@@ -10,7 +10,10 @@ class OnboardGroupAdminRequest(BaseModel):
     # pass an existing group_id here. Letting a new admin pick and take
     # control of an existing group would be a privilege-escalation bug;
     # see known-limitations.md.
-    organization_id: UUID
+    #
+    # No organization_id -- Organization is a Platform-Admin-only concept
+    # now; a Group Admin never references one, not even optionally. The
+    # resulting Group's organization_id is always NULL from this path.
     new_group_name: str
     new_group_short_code: Optional[str] = None
     cohort: Optional[str] = None
@@ -35,8 +38,6 @@ class MyGroupListItem(BaseModel):
     id: UUID
     name: str
     short_code: str
-    organization_id: UUID
-    organization_name: str
     cohort: Optional[str] = None
     members_count: int
     purses_count: int

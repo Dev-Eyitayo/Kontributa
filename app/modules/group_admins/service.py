@@ -14,7 +14,7 @@ from app.modules.group_admins.schemas import OnboardGroupAdminRequest
 from app.modules.invites.models import InviteLink
 from app.modules.invites.service import InviteService
 from app.modules.members.models import Member
-from app.modules.organizations.models import Group, Organization
+from app.modules.organizations.models import Group
 from app.modules.purses.models import Purse
 
 
@@ -59,7 +59,15 @@ class GroupAdminService:
             raise ForbiddenError("you do not administer this group")
         return admin
 
-    async def _unique_short_code(self, organization_id: UUID, requested: Optional[str], name: str) -> str:
+    async def _unique_short_code(
+        self, organization_id: Optional[UUID], requested: Optional[str], name: str
+    ) -> str:
+        # organization_id is None for every group created via a Group
+        # Admin's own onboarding now -- NULL rows are their own scope
+        # here (Group.organization_id == None compiles to IS NULL), so
+        # short_code just needs to be unique among all other orgless
+        # groups, matching the DB's own uq_group_org_short_code
+        # constraint semantics for NULL.
         base = _slugify(requested) if requested else _slugify(name)
         candidate = base
         for _ in range(20):
@@ -76,13 +84,11 @@ class GroupAdminService:
         its first admin -- there is no path here that grants control of an
         existing group (see OnboardGroupAdminRequest). Callable any number
         of times: an existing admin creating a second, third, etc. group
-        goes through this exact same method."""
-        org = await self.db.get(Organization, payload.organization_id)
-        if org is None:
-            raise NotFoundError("organization not found")
-
-        short_code = await self._unique_short_code(org.id, payload.new_group_short_code, payload.new_group_name)
-        group = Group(organization_id=org.id, name=payload.new_group_name, short_code=short_code)
+        goes through this exact same method. Never associates the group
+        with an Organization -- that's a Platform-Admin-only concept from
+        this side now (see Group.organization_id)."""
+        short_code = await self._unique_short_code(None, payload.new_group_short_code, payload.new_group_name)
+        group = Group(organization_id=None, name=payload.new_group_name, short_code=short_code)
         self.db.add(group)
         await self.db.flush()
 
@@ -95,14 +101,13 @@ class GroupAdminService:
 
     async def list_my_groups(self, user_id: UUID) -> list[dict]:
         result = await self.db.execute(
-            select(GroupAdmin, Group, Organization)
+            select(GroupAdmin, Group)
             .join(Group, GroupAdmin.group_id == Group.id)
-            .join(Organization, Group.organization_id == Organization.id)
             .where(GroupAdmin.user_id == user_id, GroupAdmin.is_active_admin.is_(True))
             .order_by(GroupAdmin.created_at)
         )
         rows = result.all()
-        group_ids = [group.id for _, group, _ in rows]
+        group_ids = [group.id for _, group in rows]
 
         members_counts: dict[UUID, int] = {}
         purses_counts: dict[UUID, int] = {}
@@ -121,14 +126,12 @@ class GroupAdminService:
             purses_counts = dict(purse_rows.all())
 
         out = []
-        for admin, group, org in rows:
+        for admin, group in rows:
             out.append(
                 {
                     "id": group.id,
                     "name": group.name,
                     "short_code": group.short_code,
-                    "organization_id": org.id,
-                    "organization_name": org.name,
                     "cohort": admin.cohort,
                     "members_count": members_counts.get(group.id, 0),
                     "purses_count": purses_counts.get(group.id, 0),

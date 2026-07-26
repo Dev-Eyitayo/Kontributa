@@ -24,7 +24,11 @@ class GroupBrief(BaseModel):
 class InviteResolveResponse(BaseModel):
     group: GroupBrief
     cohort: Optional[str] = None
-    organization: OrganizationBrief
+    # None for the vast majority of groups now -- Organization is a
+    # Platform-Admin-only concept from the Member side (see
+    # Group.organization_id). Still surfaced when present purely so the
+    # join form can hint the expected member_id_number format up front.
+    organization: Optional[OrganizationBrief] = None
     purse_title: Optional[str] = None
 
 

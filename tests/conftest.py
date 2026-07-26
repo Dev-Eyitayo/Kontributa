@@ -280,6 +280,18 @@ async def db_setup():
 
 
 @pytest_asyncio.fixture(autouse=True)
+def _bearer_mode_by_default(monkeypatch):
+    """Hermetic default regardless of whatever a developer's own local
+    .env happens to have USE_HTTPONLY_COOKIES set to (production's .env
+    turns it on; this suite's baseline assumption -- tokens in the JSON
+    response body -- predates that and is what almost every test outside
+    test_auth_cookie_mode.py relies on). Tests for cookie mode itself
+    still monkeypatch it True explicitly, same as before -- a later
+    setattr in the same test simply overrides this one."""
+    monkeypatch.setattr(settings, "USE_HTTPONLY_COOKIES", False)
+
+
+@pytest_asyncio.fixture(autouse=True)
 async def default_platform_settings(db_setup):
     """custodian_mode_enabled defaults to False in production (a fresh
     deployment is Direct-only until a platform admin turns Custodian back

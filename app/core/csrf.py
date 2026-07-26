@@ -23,7 +23,7 @@ _EXEMPT_PATHS = {
     "/api/v1/auth/reset-password",
 }
 
-_EXEMPT_PREFIXES = ("/webhooks", "/api/v1/members/join/")
+_EXEMPT_PREFIXES = ("/api/v1/webhooks", "/api/v1/members/join/")
 
 
 class CSRFMiddleware(BaseHTTPMiddleware):

@@ -118,6 +118,32 @@ async def test_cookie_mode_state_changing_request_rejected_with_wrong_csrf_heade
     assert resp.json()["error"]["code"] == "csrf_token_invalid"
 
 
+async def test_cookie_mode_member_join_via_invite_is_csrf_exempt(client, db_session, monkeypatch):
+    """A member accepting an invite link (POST /members/join/{token}) is
+    their own sign-up-equivalent -- no session exists yet, so it can never
+    carry a CSRF header, exactly like /auth/register. Regression test for
+    a real production bug: this path was missing from CSRFMiddleware's
+    exemptions (only /auth/* was covered), so real invite links 403'd with
+    csrf_token_invalid the moment USE_HTTPONLY_COOKIES went on."""
+    # The admin's own onboarding (register/login/create-invite-link) stays
+    # in ordinary Bearer mode -- only flip the flag right before the
+    # member's join call, the one this test actually exercises.
+    token, _org, group = await _create_invite_link(client, db_session, admin_email="cookie-rep@example.com")
+    monkeypatch.setattr(settings, "USE_HTTPONLY_COOKIES", True)
+
+    join = await client.post(
+        f"/members/join/{token}",
+        json={
+            "email": "cookie-member@example.com",
+            "password": "password123",
+            "first_name": "Cookie",
+            "last_name": "Member",
+        },
+    )
+    assert join.status_code == 201, join.text
+    assert join.json()["data"]["group_id"] == str(group.id)
+
+
 async def test_csrf_middleware_inactive_when_flag_off(client, db_session):
     """The flag defaults False for this whole suite -- a state-changing
     request with no CSRF header at all must NOT be rejected for that

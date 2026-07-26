@@ -52,6 +52,7 @@ class GroupAdminMeResponse(BaseModel):
     is_verified: bool
     purses_count: int
     members_count: int
+    new_members_this_month: int
 
 
 class GroupAdminUpdateRequest(BaseModel):

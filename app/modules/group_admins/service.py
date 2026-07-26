@@ -1,5 +1,6 @@
 import re
 import secrets
+from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID
 
@@ -139,7 +140,7 @@ class GroupAdminService:
             )
         return out
 
-    async def get_me(self, user_id: UUID, group_id: UUID) -> tuple[GroupAdmin, User, Group, int, int]:
+    async def get_me(self, user_id: UUID, group_id: UUID) -> tuple[GroupAdmin, User, Group, int, int, int]:
         admin = await self.get_admin_for_group(user_id, group_id)
         user = await self.db.get(User, admin.user_id)
         group = await self.db.get(Group, admin.group_id)
@@ -151,12 +152,26 @@ class GroupAdminService:
         )
         members_count = members_count_result.scalar_one()
 
+        # A real count query, not a client-side filter over some capped,
+        # oldest-first member list -- that undercounts (or misses entirely)
+        # once a group has more members than the list's own page size, since
+        # the newest joiners -- the ones this stat actually cares about --
+        # are exactly the ones sorted past the cutoff.
+        now = datetime.now(timezone.utc)
+        month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        new_members_result = await self.db.execute(
+            select(func.count())
+            .select_from(Member)
+            .where(Member.group_id == admin.group_id, Member.created_at >= month_start)
+        )
+        new_members_this_month = new_members_result.scalar_one()
+
         purses_count_result = await self.db.execute(
             select(func.count()).select_from(Purse).where(Purse.group_id == admin.group_id)
         )
         purses_count = purses_count_result.scalar_one()
 
-        return admin, user, group, members_count, purses_count
+        return admin, user, group, members_count, purses_count, new_members_this_month
 
     async def update_me(self, user_id: UUID, group_id: UUID, payload) -> tuple[GroupAdmin, User]:
         """first_name/last_name only -- organization, group, and role are

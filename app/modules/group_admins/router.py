@@ -82,7 +82,9 @@ async def get_me(
     current_user: CurrentUser = Depends(get_current_group_admin_user),
     service: GroupAdminService = Depends(get_group_admin_service),
 ) -> JSONResponse:
-    admin, user, group, members_count, purses_count = await service.get_me(current_user.id, group_id)
+    admin, user, group, members_count, purses_count, new_members_this_month = await service.get_me(
+        current_user.id, group_id
+    )
     return success_response(
         {
             "id": str(admin.id),
@@ -93,6 +95,7 @@ async def get_me(
             "is_verified": user.is_verified,
             "purses_count": purses_count,
             "members_count": members_count,
+            "new_members_this_month": new_members_this_month,
         }
     )
 

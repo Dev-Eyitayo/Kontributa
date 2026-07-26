@@ -1,7 +1,16 @@
 {% extends "base.html" %}
 {% block title %}Your invoice for {{ purse_title }} expired{% endblock %}
+{% block accent_color %}#B8892B{% endblock %}
 {% block content %}
-<p>Hi {{ first_name }},</p>
-<p>The payment window for your <strong>{{ purse_title }}</strong> invoice ({{ amount }}) has expired without a completed payment.</p>
-<p>Open the purse in your dashboard to generate a fresh account number and try again -- no need to contact your rep.</p>
+<p style="margin:0 0 4px;font-size:18px;font-weight:700;color:#1B2811;">Invoice window closed</p>
+<p style="margin:0 0 8px;">Hi {{ first_name }}, the payment window for your <strong>{{ purse_title }}</strong> invoice ({{ amount }}) expired without a completed payment.</p>
+<p style="margin:0 0 20px;color:#5B6472;font-size:13px;">No need to contact your rep &mdash; generate a fresh account number and try again whenever you&rsquo;re ready.</p>
+
+<table role="presentation" cellpadding="0" cellspacing="0">
+<tr>
+<td style="border-radius:8px;background-color:#1B2811;">
+<a href="{{ app_url }}" style="display:inline-block;padding:12px 22px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:14px;font-weight:600;color:#F4FAED;text-decoration:none;">Generate a new invoice</a>
+</td>
+</tr>
+</table>
 {% endblock %}

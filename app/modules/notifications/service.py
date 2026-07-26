@@ -24,8 +24,20 @@ _jinja_env = Environment(
 
 
 def render_template(template_name: str, context: dict) -> str:
+    # Merged in for every template rather than threaded through each
+    # call site's own context dict -- brand assets and the app's own URL
+    # belong to the shared shell (base.html), not to what triggered any
+    # individual email. FRONTEND_BASE_URL is served from Vercel, whose
+    # /public folder is what actually hosts these two static SVGs (see
+    # Kontributa-Client/public/logo/).
+    base = settings.FRONTEND_BASE_URL.rstrip("/")
+    branding = {
+        "app_url": base,
+        "logo_url": f"{base}/logo/lockup-light.svg",
+        "icon_url": f"{base}/logo/icon-light.svg",
+    }
     template = _jinja_env.get_template(template_name)
-    return template.render(**context)
+    return template.render(**{**branding, **context})
 
 
 class SendByteError(AppException):

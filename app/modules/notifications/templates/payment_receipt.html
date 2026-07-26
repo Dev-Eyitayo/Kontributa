@@ -1,11 +1,23 @@
 {% extends "base.html" %}
 {% block title %}Payment received -- {{ purse_title }}{% endblock %}
+{% block accent_color %}#A1ED63{% endblock %}
 {% block content %}
-<p>Hi {{ first_name }},</p>
-<p>We've confirmed your payment for <strong>{{ purse_title }}</strong>.</p>
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:16px 0;">
-<tr><td style="color:#6b7280;">Amount</td><td align="right"><strong>&#8358;{{ amount }}</strong></td></tr>
-<tr><td style="color:#6b7280;">Confirmed at</td><td align="right">{{ paid_at }}</td></tr>
+<p style="margin:0 0 4px;font-size:18px;font-weight:700;color:#1B2811;">Payment confirmed</p>
+<p style="margin:0 0 20px;">Hi {{ first_name }}, we&rsquo;ve confirmed your payment for <strong>{{ purse_title }}</strong>. Keep this email as your receipt.</p>
+
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 4px;background-color:#1B2811;border-radius:10px;">
+<tr>
+<td style="padding:20px 22px;">
+<span style="display:block;font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:rgba(244,250,237,0.65);">Amount received</span>
+<span style="display:block;margin-top:4px;font-size:28px;font-weight:700;color:#A1ED63;">&#8358;{{ amount }}</span>
+</td>
+</tr>
 </table>
-<p>Keep this email as your receipt.</p>
+
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:4px 0 0;border-collapse:collapse;">
+<tr>
+<td style="padding:12px 0 0;font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:#5B6472;">Confirmed at</td>
+<td align="right" style="padding:12px 0 0;font-size:14px;color:#1B2811;">{{ paid_at }}</td>
+</tr>
+</table>
 {% endblock %}

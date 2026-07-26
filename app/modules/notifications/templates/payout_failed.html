@@ -1,8 +1,18 @@
 {% extends "base.html" %}
 {% block title %}Payout failed{% endblock %}
+{% block accent_color %}#A23B32{% endblock %}
 {% block content %}
-<p>Hi {{ first_name }},</p>
-<p>A payout of <strong>&#8358;{{ amount }}</strong> for {{ group_name }} could not be completed.</p>
-<p style="color:#6b7280;">Reason: {{ failure_reason }}</p>
-<p>The funds never left the platform wallet and remain available -- you can submit a new payout request whenever you're ready.</p>
+<p style="margin:0 0 4px;font-size:18px;font-weight:700;color:#1B2811;">Payout didn&rsquo;t go through</p>
+<p style="margin:0 0 16px;">Hi {{ first_name }}, a payout of <strong>&#8358;{{ amount }}</strong> for <strong>{{ group_name }}</strong> could not be completed.</p>
+
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 20px;">
+<tr>
+<td style="background-color:rgba(162,59,50,0.07);border-left:3px solid #A23B32;border-radius:0 8px 8px 0;padding:14px 16px;">
+<span style="display:block;font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:#A23B32;">Reason</span>
+<span style="display:block;margin-top:4px;font-size:14px;color:#1B2811;">{{ failure_reason }}</span>
+</td>
+</tr>
+</table>
+
+<p style="margin:0;color:#5B6472;font-size:13px;">The funds never left the platform wallet and remain available &mdash; submit a new payout request whenever you&rsquo;re ready.</p>
 {% endblock %}

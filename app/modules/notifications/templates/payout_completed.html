@@ -1,6 +1,16 @@
 {% extends "base.html" %}
 {% block title %}Payout completed{% endblock %}
+{% block accent_color %}#A1ED63{% endblock %}
 {% block content %}
-<p>Hi {{ first_name }},</p>
-<p>A payout of <strong>&#8358;{{ amount }}</strong> for {{ group_name }} has been completed and sent to your registered settlement account.</p>
+<p style="margin:0 0 4px;font-size:18px;font-weight:700;color:#1B2811;">Payout sent</p>
+<p style="margin:0 0 20px;">Hi {{ first_name }}, a payout for <strong>{{ group_name }}</strong> has been completed and sent to your registered settlement account.</p>
+
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0;background-color:#1B2811;border-radius:10px;">
+<tr>
+<td style="padding:20px 22px;">
+<span style="display:block;font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:rgba(244,250,237,0.65);">Amount paid out</span>
+<span style="display:block;margin-top:4px;font-size:28px;font-weight:700;color:#A1ED63;">&#8358;{{ amount }}</span>
+</td>
+</tr>
+</table>
 {% endblock %}

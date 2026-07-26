@@ -1,6 +1,11 @@
 import uuid
+from datetime import datetime, timedelta, timezone
 
+from sqlalchemy import select, update
+
+from app.modules.members.models import Member
 from tests.conftest import create_org_and_group, find_redis_token, onboard_group_admin
+from tests.test_purses import _invite_and_join_member
 
 
 async def _register_and_login_group_admin(client, email="rep1@example.com"):
@@ -45,6 +50,42 @@ async def test_onboard_success_and_me(client, db_session):
     # Logging in at all requires a verified email -- confirms /group-admins/me
     # carries the same real signal /members/me does (see the Part 1 bug fix).
     assert me.json()["data"]["is_verified"] is True
+
+
+async def test_me_new_members_this_month_is_a_real_count_not_a_capped_list_filter(client, db_session):
+    """Regression test: this used to be computed client-side by filtering
+    the (200-row-capped, oldest-first) member list -- which undercounts
+    for any group past that cap, since the newest joiners are exactly the
+    ones sorted past the cutoff. new_members_this_month is now its own
+    COUNT query instead, so it's correct regardless of group size."""
+    org, _existing_group = await create_org_and_group(db_session)
+    headers = await _register_and_login_group_admin(client)
+    onboard = await client.post(
+        "/group-admins/onboard",
+        json={"organization_id": str(org.id), "new_group_name": "Growth Group"},
+        headers=headers,
+    )
+    group_id = onboard.json()["data"]["group_id"]
+
+    await _invite_and_join_member(client, headers, group_id, email="recent@example.com")
+    await _invite_and_join_member(client, headers, group_id, email="old@example.com")
+
+    # Backdate one member to well within last month -- only the other one
+    # should count as "new this month".
+    result = await db_session.execute(select(Member).where(Member.group_id == uuid.UUID(group_id)))
+    members = result.scalars().all()
+    # Both members are otherwise equivalent -- just pick one deterministically.
+    old_member = sorted(members, key=lambda m: m.created_at)[-1]
+
+    month_start = datetime.now(timezone.utc).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    last_month = month_start - timedelta(days=1)
+    await db_session.execute(update(Member).where(Member.id == old_member.id).values(created_at=last_month))
+    await db_session.commit()
+
+    me = await client.get(f"/group-admins/me?group_id={group_id}", headers=headers)
+    assert me.status_code == 200
+    assert me.json()["data"]["members_count"] == 2
+    assert me.json()["data"]["new_members_this_month"] == 1
 
 
 async def test_update_group_admin_me_edits_name_only(client, db_session):

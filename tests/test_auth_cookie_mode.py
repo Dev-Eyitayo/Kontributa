@@ -1,5 +1,6 @@
 from app.core.config import settings
 from tests.conftest import find_redis_token
+from tests.test_invites_members import _create_invite_link
 
 
 async def _register_verify_login(client, monkeypatch, email="cookie-user@example.com"):

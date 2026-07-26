@@ -13,6 +13,7 @@ ENV/
 .env
 .env.*
 !.env.example
+!.env.prod.example
 .secrets.*
 
 
@@ -55,3 +56,4 @@ api-spec.md
 
 monnify-docs.md
 docs/
+.env.prod

@@ -3,7 +3,9 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
 
+from app.core.config import settings
 from app.core.csrf import CSRFMiddleware
 from app.core.exceptions import AppException
 from app.core.logging import configure_logging
@@ -42,6 +44,20 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Kontributa API", version="1.0.0", lifespan=lifespan)
 app.add_middleware(CSRFMiddleware)
+# Added after CSRFMiddleware so it wraps outermost (Starlette runs the
+# most-recently-added middleware first) -- CORS preflight (OPTIONS) and
+# response headers need to be handled before/around everything else,
+# including on error responses. allow_credentials is required for the
+# httpOnly-cookie auth mode; with specific origins (never "*") that's
+# allowed. See settings.ALLOWED_ORIGINS's own comment for when this
+# actually matters.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_allowed_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 @app.exception_handler(AppException)

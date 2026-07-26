@@ -501,6 +501,8 @@ async def test_purse_summary_splits_collected_by_source(client, db_session):
     data = summary.json()["data"]
     assert data["collected_via_kontributa"] == "1000.00"
     assert data["collected_manually"] == "1000.00"
+    # paid_count is fully-settled, electronic and manual combined.
+    assert data["paid_count"] == 2
     assert data["total_collected"] == "2000.00"
 
 

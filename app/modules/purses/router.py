@@ -281,7 +281,9 @@ async def list_contributions(
     else:
         await admin_service.get_admin_for_group(current_user.id, purse.group_id)
 
-    rows, total = await contribution_service.list_for_purse(purse_id, status, limit, offset)
+    rows, total = await contribution_service.list_for_purse(
+        purse_id, status, limit, offset, purse_status=purse.status.value
+    )
     return success_response(
         {
             "items": [
@@ -377,7 +379,7 @@ async def get_summary(
     purse = await purse_service.get_by_id(purse_id)
     await admin_service.get_admin_for_group(current_user.id, purse.group_id)
 
-    summary = await contribution_service.summary_for_purse(purse_id)
+    summary = await contribution_service.summary_for_purse(purse_id, purse.status.value)
     return success_response(
         {
             **summary,
@@ -401,7 +403,7 @@ async def export_purse(
     await admin_service.get_admin_for_group(current_user.id, purse.group_id)
 
     contributions = await contribution_service.list_all_for_purse(purse_id)
-    summary = await contribution_service.summary_for_purse(purse_id)
+    summary = await contribution_service.summary_for_purse(purse_id, purse.status.value)
     body = build_export(format, purse, contributions, summary["total_collected"])
 
     filename = export_filename(purse.title, format)

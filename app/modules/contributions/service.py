@@ -138,6 +138,7 @@ class ContributionService:
         status: Optional[ContributionStatus] = None,
         limit: int = 20,
         offset: int = 0,
+        purse_status: Optional[str] = None,
     ) -> tuple[list[tuple[Contribution, Member, User]], int]:
         stmt = (
             select(Contribution, Member, User)
@@ -145,7 +146,14 @@ class ContributionService:
             .join(User, Member.user_id == User.id)
             .where(Contribution.purse_id == purse_id)
         )
-        if status is not None:
+        if status == ContributionStatus.PENDING.value and purse_status == PurseStatus.OPEN.value:
+            # Mirrors compute_display_status: on an open purse, an expired
+            # invoice reads as "pending" everywhere in the UI (it's one tap
+            # from being paid), so the "pending" filter must surface it too
+            # -- otherwise it silently vanishes from every filtered view
+            # while still being counted as pending in the badge/summary.
+            stmt = stmt.where(Contribution.status.in_([ContributionStatus.PENDING, ContributionStatus.EXPIRED]))
+        elif status is not None:
             stmt = stmt.where(Contribution.status == status)
 
         total = (await self.db.execute(select(func.count()).select_from(stmt.subquery()))).scalar_one()
@@ -166,7 +174,7 @@ class ContributionService:
         result = await self.db.execute(stmt)
         return [(row[0], row[1], row[2]) for row in result.all()]
 
-    async def summary_for_purse(self, purse_id: UUID) -> dict:
+    async def summary_for_purse(self, purse_id: UUID, purse_status: str) -> dict:
         stmt = select(Contribution.status, func.count(), func.coalesce(func.sum(Contribution.amount_received), 0)).where(
             Contribution.purse_id == purse_id
         ).group_by(Contribution.status)
@@ -191,10 +199,23 @@ class ContributionService:
         completed_count = counts[ContributionStatus.PAID.value] + counts[ContributionStatus.PAID_MANUAL.value]
         percent_complete = round((completed_count / total_count) * 100, 2) if total_count else 0.0
 
+        # Mirrors compute_display_status: an expired invoice on a purse
+        # that's still open reads as "pending" everywhere else in the app,
+        # so it must count as pending here too rather than in its own
+        # separate/absent bucket.
+        purse_still_open = purse_status == PurseStatus.OPEN.value
+        pending_count = counts[ContributionStatus.PENDING.value] + (
+            counts[ContributionStatus.EXPIRED.value] if purse_still_open else 0
+        )
+        expired_count = 0 if purse_still_open else counts[ContributionStatus.EXPIRED.value]
+
         return {
-            "paid_count": counts[ContributionStatus.PAID.value],
-            "pending_count": counts[ContributionStatus.PENDING.value],
-            "expired_count": counts[ContributionStatus.EXPIRED.value],
+            # Fully settled, electronic and manually-logged combined --
+            # matches the "paid" convention counts_for_purses already uses
+            # for the purses-list screen's own paid_count.
+            "paid_count": completed_count,
+            "pending_count": pending_count,
+            "expired_count": expired_count,
             "flagged_count": counts[ContributionStatus.FLAGGED_FOR_REVIEW.value],
             "total_collected": total_collected,
             "collected_via_kontributa": collected_via_kontributa,

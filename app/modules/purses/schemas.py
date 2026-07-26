@@ -78,7 +78,11 @@ class MemberVisibleContributionItem(BaseModel):
 
 
 class PurseSummary(BaseModel):
+    # Fully settled -- electronic (paid) and manually-logged (paid_manual)
+    # combined, same convention as counts_for_purses' own paid_count.
     paid_count: int
+    # display_status-driven: an expired invoice on a purse that's still
+    # open counts here, not in expired_count -- see compute_display_status.
     pending_count: int
     expired_count: int
     flagged_count: int

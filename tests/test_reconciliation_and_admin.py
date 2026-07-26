@@ -175,6 +175,14 @@ async def test_display_status_reads_pending_for_expired_invoice_on_open_purse(cl
     assert my_item["contribution_status"] == "expired"
     assert my_item["display_status"] == "pending"
 
+    # The purse summary's pending_count is display_status-driven too -- an
+    # expired invoice on a still-open purse counts as pending here, not in
+    # its own separate/absent bucket.
+    summary_open = await client.get(f"/purses/{ctx['purse_id']}/summary", headers=ctx["admin_headers"])
+    summary_open_data = summary_open.json()["data"]
+    assert summary_open_data["pending_count"] == 1
+    assert summary_open_data["expired_count"] == 0
+
     # The real pending -> expired transition (fired by the reconciliation
     # job above) is still in the audit trail exactly as it happened --
     # the display-layer distinction never touches this.
@@ -194,6 +202,11 @@ async def test_display_status_reads_pending_for_expired_invoice_on_open_purse(cl
     )
     assert detail_after_close.json()["data"]["status"] == "expired"
     assert detail_after_close.json()["data"]["display_status"] == "expired"
+
+    summary_closed = await client.get(f"/purses/{ctx['purse_id']}/summary", headers=ctx["admin_headers"])
+    summary_closed_data = summary_closed.json()["data"]
+    assert summary_closed_data["pending_count"] == 0
+    assert summary_closed_data["expired_count"] == 1
 
 
 async def test_admin_webhook_events_and_flagged_contributions(client, db_session):

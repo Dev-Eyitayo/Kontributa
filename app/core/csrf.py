@@ -23,7 +23,14 @@ _EXEMPT_PATHS = {
     "/api/v1/auth/reset-password",
 }
 
-_EXEMPT_PREFIXES = ("/api/v1/webhooks", "/api/v1/members/join/")
+# Prefixes rather than exact paths -- /members/join/{token} carries a
+# dynamic invite-token segment no fixed string could match. It's a
+# member's own sign-up-equivalent (creates their account, no session
+# exists yet) -- same reasoning as /auth/register above, just under a
+# different router. Deliberately NOT /members/join-additional/{token},
+# which requires get_current_user (an existing session, so it should
+# stay CSRF-protected).
+_EXEMPT_PREFIXES = ("/webhooks", "/api/v1/members/join/")
 
 
 class CSRFMiddleware(BaseHTTPMiddleware):

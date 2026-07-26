@@ -280,15 +280,17 @@ async def db_setup():
 
 
 @pytest_asyncio.fixture(autouse=True)
-def _bearer_mode_by_default(monkeypatch):
-    """Hermetic default regardless of whatever a developer's own local
-    .env happens to have USE_HTTPONLY_COOKIES set to (production's .env
-    turns it on; this suite's baseline assumption -- tokens in the JSON
-    response body -- predates that and is what almost every test outside
-    test_auth_cookie_mode.py relies on). Tests for cookie mode itself
-    still monkeypatch it True explicitly, same as before -- a later
-    setattr in the same test simply overrides this one."""
+def _dev_settings_by_default(monkeypatch):
+    """Hermetic defaults regardless of whatever a developer's own local
+    .env happens to have these set to (production's .env turns both on;
+    this suite's baseline assumptions -- tokens in the JSON response
+    body, and cookies without Secure so the plain-http:// test client can
+    actually send them back -- predate that and is what nearly every
+    test outside test_auth_cookie_mode.py relies on). Tests for cookie
+    mode/Secure itself still monkeypatch these True explicitly, same as
+    before -- a later setattr in the same test simply overrides this."""
     monkeypatch.setattr(settings, "USE_HTTPONLY_COOKIES", False)
+    monkeypatch.setattr(settings, "ENV", "development")
 
 
 @pytest_asyncio.fixture(autouse=True)

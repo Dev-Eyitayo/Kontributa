@@ -138,6 +138,47 @@ async def test_update_group_rejects_non_admin_of_that_group(client, db_session):
     assert resp.status_code == 403
 
 
+async def test_list_members_shows_members_when_group_onboarded_with_a_cohort(client, db_session):
+    """Regression test for a real production bug: onboarding used to only
+    stamp GroupAdmin.cohort with the requested cohort, leaving Group.cohort
+    (what a joining Member actually inherits) at None -- and list_members
+    used to *also* silently filter by that same stale GroupAdmin.cohort.
+    Combined, any admin who entered a cohort at onboarding got an
+    empty-looking Members page forever after, despite real members
+    existing. Both are fixed: onboarding now sets Group.cohort too, and
+    list_members no longer has a hidden admin-cohort filter at all."""
+    org, _existing_group = await create_org_and_group(db_session)
+    headers = await _register_and_login_group_admin(client)
+    onboard = await client.post(
+        "/group-admins/onboard",
+        json={"organization_id": str(org.id), "new_group_name": "400L Software Engineering", "cohort": "400L"},
+        headers=headers,
+    )
+    group_id = onboard.json()["data"]["group_id"]
+
+    from tests.conftest import find_redis_token
+
+    invite = await client.post(
+        f"/group-admins/invite-links?group_id={group_id}", json={"expires_in_days": 7}, headers=headers
+    )
+    token = invite.json()["data"]["token"]
+    join = await client.post(
+        f"/members/join/{token}",
+        json={"email": "member@example.com", "password": "password123", "first_name": "New", "last_name": "Member"},
+    )
+    assert join.status_code == 201
+    # The member correctly inherits the group's cohort, set at onboarding.
+    assert join.json()["data"]["cohort"] == "400L"
+
+    verify_token = await find_redis_token("verify_email")
+    await client.post("/auth/verify-email", json={"email": "member@example.com", "token": verify_token})
+
+    members = await client.get(f"/group-admins/members?group_id={group_id}", headers=headers)
+    assert members.status_code == 200
+    assert members.json()["data"]["total"] == 1
+    assert members.json()["data"]["items"][0]["name"] == "New Member"
+
+
 async def test_update_group_sets_cohort_not_retroactive(client, db_session):
     """Changing a group's cohort only affects members who join, and purses
     created, after the change -- an already-joined member and an

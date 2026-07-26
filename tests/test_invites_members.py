@@ -39,16 +39,12 @@ async def _create_invite_link(
     headers = {"Authorization": f"Bearer {admin_token}"}
     group = await onboard_group_admin(client, db_session, org, headers, cohort=cohort)
     # Onboarding never associates a Group with an Organization anymore
-    # (see GroupAdminService.onboard) -- set directly here, same as the
-    # cohort workaround below, since there's no API path for it. Mirrors
-    # how a real org-linked group would only ever come from the
-    # Platform Admin's own POST /admin/groups.
+    # (see GroupAdminService.onboard) -- set directly here, since there's
+    # no API path for it. Mirrors how a real org-linked group would only
+    # ever come from the Platform Admin's own POST /admin/groups. cohort
+    # itself doesn't need the same workaround -- onboard's own payload
+    # already sets Group.cohort correctly.
     group.organization_id = org.id
-    # Cohort is inherited from the group, never a per-invite input (see
-    # PATCH /groups/{id}) -- set directly here since there's no API path to
-    # give a brand-new group a cohort at creation time.
-    if cohort is not None:
-        group.cohort = cohort
     await db_session.commit()
     await db_session.refresh(group)
     invite = await client.post(

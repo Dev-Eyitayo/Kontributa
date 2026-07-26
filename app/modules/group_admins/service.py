@@ -89,7 +89,12 @@ class GroupAdminService:
         with an Organization -- that's a Platform-Admin-only concept from
         this side now (see Group.organization_id)."""
         short_code = await self._unique_short_code(None, payload.new_group_short_code, payload.new_group_name)
-        group = Group(organization_id=None, name=payload.new_group_name, short_code=short_code)
+        # Group.cohort (not GroupAdmin.cohort below) is what every joining
+        # Member actually inherits -- see its own docstring. Onboarding
+        # used to only stamp GroupAdmin.cohort, leaving Group.cohort at
+        # None regardless of what the admin entered here, so every member
+        # who ever joined inherited no cohort at all.
+        group = Group(organization_id=None, name=payload.new_group_name, short_code=short_code, cohort=payload.cohort)
         self.db.add(group)
         await self.db.flush()
 
@@ -243,14 +248,19 @@ class GroupAdminService:
     ) -> tuple[list[tuple[Member, User, Optional[InviteLink]]], int]:
         admin = await self.get_admin_for_group(user_id, group_id)
 
+        # Deliberately not scoped by admin.cohort -- that's a one-time
+        # snapshot of whatever the admin typed at onboarding (see
+        # GroupAdminService.onboard), while Member.cohort is inherited
+        # from Group.cohort, the actual single source of truth, which can
+        # change over time. The two silently drifting apart hid every
+        # real member from this list once they did. The only cohort
+        # scoping here is the caller's own explicit filter.
         stmt = (
             select(Member, User, InviteLink)
             .join(User, Member.user_id == User.id)
             .outerjoin(InviteLink, Member.invite_source == InviteLink.id)
             .where(Member.group_id == admin.group_id)
         )
-        if admin.cohort is not None:
-            stmt = stmt.where(Member.cohort == admin.cohort)
         if cohort is not None:
             stmt = stmt.where(Member.cohort == cohort)
 

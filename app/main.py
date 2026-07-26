@@ -90,24 +90,31 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
     return error_response("internal_error", "an unexpected error occurred", status_code=500)
 
 
-app.include_router(auth_router)
-app.include_router(organizations_public_router)
-app.include_router(organizations_admin_router)
-app.include_router(group_admins_router)
-app.include_router(groups_router)
-app.include_router(invites_router)
-app.include_router(members_router)
-app.include_router(purses_router)
-app.include_router(notifications_router)
-app.include_router(contributions_router)
+API_V1_PREFIX = "/api/v1"
+
+app.include_router(auth_router, prefix=API_V1_PREFIX)
+app.include_router(organizations_public_router, prefix=API_V1_PREFIX)
+app.include_router(organizations_admin_router, prefix=API_V1_PREFIX)
+app.include_router(group_admins_router, prefix=API_V1_PREFIX)
+app.include_router(groups_router, prefix=API_V1_PREFIX)
+app.include_router(invites_router, prefix=API_V1_PREFIX)
+app.include_router(members_router, prefix=API_V1_PREFIX)
+app.include_router(purses_router, prefix=API_V1_PREFIX)
+app.include_router(notifications_router, prefix=API_V1_PREFIX)
+app.include_router(contributions_router, prefix=API_V1_PREFIX)
+app.include_router(admin_router, prefix=API_V1_PREFIX)
+app.include_router(settlement_router, prefix=API_V1_PREFIX)
+app.include_router(payouts_router, prefix=API_V1_PREFIX)
+app.include_router(audit_router, prefix=API_V1_PREFIX)
+app.include_router(banks_router, prefix=API_V1_PREFIX)
+app.include_router(platform_settings_router, prefix=API_V1_PREFIX)
+app.include_router(realtime_router, prefix=API_V1_PREFIX)
+
+# Deliberately NOT under /api/v1: webhooks is an external contract (the
+# URL registered in the Monnify dashboard), not a client-facing API this
+# app's own version bumps should touch; health is an infra probe (Render's
+# healthCheckPath) that every version of this app must answer the same way.
 app.include_router(webhooks_router)
-app.include_router(admin_router)
-app.include_router(settlement_router)
-app.include_router(payouts_router)
-app.include_router(audit_router)
-app.include_router(banks_router)
-app.include_router(platform_settings_router)
-app.include_router(realtime_router)
 
 
 @app.get("/health")

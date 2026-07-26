@@ -15,12 +15,12 @@ _SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 # server-to-server with their own signature-based auth, never carrying
 # our cookies at all.
 _EXEMPT_PATHS = {
-    "/auth/login",
-    "/auth/register",
-    "/auth/verify-email",
-    "/auth/resend-verification",
-    "/auth/forgot-password",
-    "/auth/reset-password",
+    "/api/v1/auth/login",
+    "/api/v1/auth/register",
+    "/api/v1/auth/verify-email",
+    "/api/v1/auth/resend-verification",
+    "/api/v1/auth/forgot-password",
+    "/api/v1/auth/reset-password",
 }
 _EXEMPT_PREFIXES = ("/webhooks",)
 

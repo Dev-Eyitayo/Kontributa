@@ -293,9 +293,25 @@ async def default_platform_settings(db_setup):
         await session.commit()
 
 
+class _VersionedTransport(ASGITransport):
+    """Every real route now lives under /api/v1 (see app/main.py) except
+    the deliberately-unversioned /webhooks and /health. Rewriting the
+    request path here -- once -- means this file's ~300 existing
+    `client.get("/auth/...")`-style call sites across every test module
+    never had to be rewritten by hand to spell out the prefix themselves."""
+
+    _UNVERSIONED_PREFIXES = ("/webhooks", "/health")
+
+    async def handle_async_request(self, request):
+        path = request.url.path
+        if not path.startswith(self._UNVERSIONED_PREFIXES) and not path.startswith("/api/v1"):
+            request.url = request.url.copy_with(path=f"/api/v1{path}")
+        return await super().handle_async_request(request)
+
+
 @pytest_asyncio.fixture
 async def client(db_setup):
-    transport = ASGITransport(app=app)
+    transport = _VersionedTransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         yield ac
 

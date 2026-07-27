@@ -201,7 +201,7 @@ class MonnifyClient:
         a read-only lookup; nothing is persisted by calling it."""
         body = await self._request(
             "GET",
-            f"/api/v1/disbursements/account/validate?accountNumber={account_number}&bankCode={bank_code}",
+            f"/api/v2/disbursements/account/validate?accountNumber={account_number}&bankCode={bank_code}",
         )
         return MonnifyAccountName(
             account_number=body.get("accountNumber", account_number),

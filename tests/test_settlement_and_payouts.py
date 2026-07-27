@@ -76,7 +76,12 @@ async def _setup_purse_with_paid_contribution(client, db_session, collected="250
 
     from app.modules.contributions.models import Contribution
 
-    result = await db_session.execute(select(Contribution).where(Contribution.purse_id == purse_id))
+    # member_id IS NOT NULL -- a purse also gets an admin-owned row for
+    # the group's own admin at creation time now (see
+    # ContributionService.generate_for_purse).
+    result = await db_session.execute(
+        select(Contribution).where(Contribution.purse_id == purse_id, Contribution.member_id.is_not(None))
+    )
     contribution = result.scalar_one()
 
     # Real, webhook-confirmed money (ContributionStatus.PAID) -- not
@@ -120,7 +125,9 @@ async def _add_purse_with_collected_amount(client, db_session, headers, group_id
 
     from app.modules.contributions.models import Contribution
 
-    result = await db_session.execute(select(Contribution).where(Contribution.purse_id == purse_id))
+    result = await db_session.execute(
+        select(Contribution).where(Contribution.purse_id == purse_id, Contribution.member_id.is_not(None))
+    )
     contribution = result.scalar_one()
 
     # Real, webhook-confirmed money -- see _setup_purse_with_paid_contribution.
@@ -975,7 +982,9 @@ async def test_paid_manual_excluded_from_collected_and_available_balance(client,
 
     from app.modules.contributions.models import Contribution, ContributionStatus
 
-    result = await db_session.execute(select(Contribution).where(Contribution.purse_id == manual_purse_id))
+    result = await db_session.execute(
+        select(Contribution).where(Contribution.purse_id == manual_purse_id, Contribution.member_id.is_not(None))
+    )
     manual_contribution = result.scalar_one()
     manual_contribution.status = ContributionStatus.PENDING
     manual_contribution.amount_received = Decimal("0")

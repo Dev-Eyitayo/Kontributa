@@ -68,7 +68,12 @@ async def _setup_purse_with_paid_contribution(client, db_session, email="rep@exa
 
     from app.modules.contributions.models import Contribution
 
-    result = await db_session.execute(select(Contribution).where(Contribution.purse_id == purse_id))
+    # member_id IS NOT NULL -- a purse also gets an admin-owned row for
+    # the group's own admin at creation time now (see
+    # ContributionService.generate_for_purse).
+    result = await db_session.execute(
+        select(Contribution).where(Contribution.purse_id == purse_id, Contribution.member_id.is_not(None))
+    )
     contribution = result.scalar_one()
 
     mark = await client.post(

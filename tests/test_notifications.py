@@ -78,7 +78,12 @@ async def _setup_purse_with_member(client, db_session, amount="2500.00"):
     )
     purse_id = create.json()["data"]["id"]
 
-    result = await db_session.execute(select(Contribution).where(Contribution.purse_id == purse_id))
+    # member_id IS NOT NULL -- a purse also gets an admin-owned row for
+    # the group's own admin at creation time now (see
+    # ContributionService.generate_for_purse).
+    result = await db_session.execute(
+        select(Contribution).where(Contribution.purse_id == purse_id, Contribution.member_id.is_not(None))
+    )
     contribution = result.scalar_one()
 
     return {
@@ -195,7 +200,9 @@ async def _setup_purse_with_paid_contribution(client, db_session, collected="250
     )
     purse_id = create.json()["data"]["id"]
 
-    result = await db_session.execute(select(Contribution).where(Contribution.purse_id == purse_id))
+    result = await db_session.execute(
+        select(Contribution).where(Contribution.purse_id == purse_id, Contribution.member_id.is_not(None))
+    )
     contribution = result.scalar_one()
 
     # Real, webhook-confirmed money -- both callers of this helper go on
@@ -416,7 +423,11 @@ async def test_payout_failed_email_sent_to_rep(client, db_session):
     assert "Payout failed" in matching[0]["subject"]
 
 
-async def test_remind_sends_only_to_pending_members(client, db_session):
+async def test_remind_sends_only_to_pending_contributors(client, db_session):
+    """Every still-pending contributor gets a reminder -- the paid member
+    doesn't, but the group's own admin does too, since their own
+    contribution to this purse (see ContributionService.generate_for_purse)
+    is just as pending as the unpaid member's."""
     org, group, admin_headers, purse_id, pending_email = await _setup_purse_with_two_members(client, db_session)
     _state["sendbyte"].sent.clear()
 
@@ -425,8 +436,9 @@ async def test_remind_sends_only_to_pending_members(client, db_session):
     assert resp.json()["data"]["status"] == "reminders_queued"
 
     sent = _state["sendbyte"].sent
-    assert len(sent) == 1
-    assert sent[0]["to_email"] == pending_email
+    assert len(sent) == 2
+    recipients = {s["to_email"] for s in sent}
+    assert recipients == {pending_email, "rep@example.com"}
 
 
 async def test_remind_weekly_cooldown_blocks_immediate_repeat(client, db_session):
@@ -439,7 +451,9 @@ async def test_remind_weekly_cooldown_blocks_immediate_repeat(client, db_session
     second = await client.post(f"/purses/{purse_id}/remind", headers=admin_headers)
     assert second.status_code == 422
     assert second.json()["error"]["code"] == "reminder_too_soon"
-    assert len(_state["sendbyte"].sent) == 1
+    # One pending member, plus the group's own admin (also still pending
+    # on their own contribution) -- see ContributionService.generate_for_purse.
+    assert len(_state["sendbyte"].sent) == 2
 
     result = await db_session.execute(select(Purse).where(Purse.id == purse_id))
     purse = result.scalar_one()
@@ -450,7 +464,7 @@ async def test_remind_weekly_cooldown_blocks_immediate_repeat(client, db_session
 
     third = await client.post(f"/purses/{purse_id}/remind", headers=admin_headers)
     assert third.status_code == 200
-    assert len(_state["sendbyte"].sent) == 2
+    assert len(_state["sendbyte"].sent) == 4
 
 
 async def test_remind_disabled_via_settings(client, db_session, monkeypatch):

@@ -1,5 +1,7 @@
 import logging
+from datetime import date, datetime
 from pathlib import Path
+from typing import Any
 from uuid import UUID
 
 import httpx
@@ -18,10 +20,48 @@ from app.modules.purses.models import Purse
 
 logger = logging.getLogger("kontributa.notifications")
 
+
+def format_datetime(value: Any) -> str:
+    """Format a datetime, date, or ISO date string into a human-readable string:
+    'Jul 27, 2026 at 6:25 PM' for datetimes, or 'Jul 27, 2026' for dates.
+    """
+    if not value:
+        return ""
+
+    dt: datetime | None = None
+    if isinstance(value, datetime):
+        dt = value
+    elif isinstance(value, date):
+        return value.strftime("%b %d, %Y")
+    elif isinstance(value, str):
+        val_str = value.strip()
+        if not val_str:
+            return ""
+        try:
+            dt = datetime.fromisoformat(val_str.replace("Z", "+00:00"))
+        except ValueError:
+            try:
+                d = date.fromisoformat(val_str)
+                return d.strftime("%b %d, %Y")
+            except ValueError:
+                return val_str
+
+    if dt is not None:
+        time_str = dt.strftime("%I:%M %p").lstrip("0")
+        date_str = dt.strftime("%b %d, %Y")
+        return f"{date_str} at {time_str}"
+
+    return str(value)
+
+
 _TEMPLATES_DIR = Path(__file__).parent / "templates"
 _jinja_env = Environment(
     loader=FileSystemLoader(_TEMPLATES_DIR), autoescape=select_autoescape(["html"])
 )
+_jinja_env.filters["format_datetime"] = format_datetime
+_jinja_env.filters["format_date"] = format_datetime
+_jinja_env.filters["datetime"] = format_datetime
+_jinja_env.filters["date"] = format_datetime
 
 
 def render_template(template_name: str, context: dict) -> str:
@@ -189,7 +229,7 @@ async def send_purse_reminders(
                     "first_name": user.first_name,
                     "purse_title": purse.title,
                     "amount": str(contribution.amount_expected - contribution.amount_received),
-                    "deadline": purse.deadline.isoformat(),
+                    "deadline": format_datetime(purse.deadline),
                 },
             )
 

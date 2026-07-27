@@ -15,7 +15,7 @@ from app.modules.auth.models import User
 from app.modules.contributions.models import ActorType, Contribution, ContributionEvent, ContributionStatus
 from app.modules.group_admins.models import GroupAdmin
 from app.modules.members.models import Member
-from app.modules.notifications.service import NotificationService
+from app.modules.notifications.service import NotificationService, format_datetime
 from app.modules.organizations.models import Group
 from app.modules.payments.service import MonnifyClient
 from app.modules.platform_settings.service import PlatformSettingsService
@@ -702,7 +702,7 @@ class ContributionService:
                     {
                         "purse_title": purse.title,
                         "amount": str(contribution.amount_received),
-                        "paid_at": contribution.paid_at.isoformat() if contribution.paid_at else "",
+                        "paid_at": format_datetime(contribution.paid_at) if contribution.paid_at else "",
                     },
                 )
 

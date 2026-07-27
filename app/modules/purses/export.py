@@ -14,10 +14,7 @@ from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
 from reportlab.platypus import Table as PdfTable
 from reportlab.platypus import TableStyle
 
-from app.modules.auth.models import User
-from app.modules.contributions.models import Contribution
-from app.modules.contributions.service import compute_display_status
-from app.modules.members.models import Member
+from app.modules.contributions.service import ContributionRow, compute_display_status
 from app.modules.purses.models import Purse
 
 ExportFormat = Literal["xlsx", "pdf"]
@@ -29,19 +26,20 @@ _CONTENT_TYPES = {
 }
 
 
-def _report_rows(
-    contributions: list[tuple[Contribution, Member, User]], purse_status: str
-) -> list[list[str]]:
+def _report_rows(contributions: list[ContributionRow], purse_status: str) -> list[list[str]]:
     return [
         [
-            f"{user.first_name} {user.last_name}",
-            member.member_id_number or "",
-            compute_display_status(contribution.status.value, purse_status),
-            str(contribution.amount_expected),
-            str(contribution.amount_received),
-            contribution.paid_at.isoformat() if contribution.paid_at else "",
+            # An admin's own contribution is just another row in this same
+            # report -- no separate section -- with a minimal inline label
+            # so it's still distinguishable at a glance in a flat export.
+            f"{row.name} (Admin)" if row.owner_type == "admin" else row.name,
+            row.member_id_number or "",
+            compute_display_status(row.contribution.status.value, purse_status),
+            str(row.contribution.amount_expected),
+            str(row.contribution.amount_received),
+            row.contribution.paid_at.isoformat() if row.contribution.paid_at else "",
         ]
-        for contribution, member, user in contributions
+        for row in contributions
     ]
 
 
@@ -58,7 +56,7 @@ def content_type_for(fmt: ExportFormat) -> str:
     return _CONTENT_TYPES[fmt]
 
 
-def build_xlsx(purse: Purse, contributions: list[tuple[Contribution, Member, User]], total_collected: Decimal) -> bytes:
+def build_xlsx(purse: Purse, contributions: list[ContributionRow], total_collected: Decimal) -> bytes:
     wb = Workbook()
     ws = wb.active
     ws.title = "Contributions"
@@ -87,7 +85,7 @@ def build_xlsx(purse: Purse, contributions: list[tuple[Contribution, Member, Use
     return buffer.getvalue()
 
 
-def build_pdf(purse: Purse, contributions: list[tuple[Contribution, Member, User]], total_collected: Decimal) -> bytes:
+def build_pdf(purse: Purse, contributions: list[ContributionRow], total_collected: Decimal) -> bytes:
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=A4)
     styles = getSampleStyleSheet()
@@ -119,7 +117,7 @@ def build_pdf(purse: Purse, contributions: list[tuple[Contribution, Member, User
 
 
 def build_export(
-    fmt: ExportFormat, purse: Purse, contributions: list[tuple[Contribution, Member, User]], total_collected: Decimal
+    fmt: ExportFormat, purse: Purse, contributions: list[ContributionRow], total_collected: Decimal
 ) -> bytes:
     if fmt == "xlsx":
         return build_xlsx(purse, contributions, total_collected)

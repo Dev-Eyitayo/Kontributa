@@ -11,6 +11,7 @@ from app.core.config import settings
 from app.core.exceptions import AppException
 from app.modules.auth.models import User
 from app.modules.contributions.models import Contribution, ContributionStatus
+from app.modules.group_admins.models import GroupAdmin
 from app.modules.members.models import Member
 from app.modules.notifications.models import NotificationLog, NotificationStatus
 from app.modules.purses.models import Purse
@@ -157,15 +158,28 @@ async def send_purse_reminders(
         if purse is None:
             return
 
-        stmt = (
-            select(Contribution, Member, User)
+        # Two queries, not one join -- a contribution belongs to either a
+        # Member or a GroupAdmin, never both (see
+        # Contribution.ck_contribution_exactly_one_owner). An admin's own
+        # pending contribution to their group's purse is just another row
+        # here, same as any member's, so it gets the exact same reminder.
+        member_stmt = (
+            select(Contribution, User)
             .join(Member, Contribution.member_id == Member.id)
             .join(User, Member.user_id == User.id)
             .where(Contribution.purse_id == purse_id, Contribution.status == ContributionStatus.PENDING)
         )
-        rows = (await db.execute(stmt)).all()
+        admin_stmt = (
+            select(Contribution, User)
+            .join(GroupAdmin, Contribution.group_admin_id == GroupAdmin.id)
+            .join(User, GroupAdmin.user_id == User.id)
+            .where(Contribution.purse_id == purse_id, Contribution.status == ContributionStatus.PENDING)
+        )
+        member_rows = (await db.execute(member_stmt)).all()
+        admin_rows = (await db.execute(admin_stmt)).all()
+        rows = [*member_rows, *admin_rows]
 
-        for contribution, member, user in rows:
+        for contribution, user in rows:
             await notifications.send(
                 to_email=user.email,
                 to_name=f"{user.first_name} {user.last_name}",

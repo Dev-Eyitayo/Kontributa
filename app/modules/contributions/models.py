@@ -4,7 +4,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Optional
 
-from sqlalchemy import DateTime, Enum, ForeignKey, Numeric, String, Text, UniqueConstraint, func
+from sqlalchemy import CheckConstraint, DateTime, Enum, ForeignKey, Numeric, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -26,15 +26,33 @@ class ActorType(str, enum.Enum):
 
 
 class Contribution(Base):
+    """Belongs to either a Member or a GroupAdmin, never both, never
+    neither -- an admin contributing to their own group's purse is just
+    another row here, not a separate table or concept (see
+    ContributionService.generate_for_purse, which eager-creates one row
+    per active GroupAdmin alongside the existing one per eligible
+    Member)."""
+
     __tablename__ = "contributions"
-    __table_args__ = (UniqueConstraint("purse_id", "member_id", name="uq_contribution_purse_member"),)
+    __table_args__ = (
+        UniqueConstraint("purse_id", "member_id", name="uq_contribution_purse_member"),
+        UniqueConstraint("purse_id", "group_admin_id", name="uq_contribution_purse_group_admin"),
+        CheckConstraint(
+            "(member_id IS NOT NULL AND group_admin_id IS NULL) "
+            "OR (member_id IS NULL AND group_admin_id IS NOT NULL)",
+            name="ck_contribution_exactly_one_owner",
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     purse_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("purses.id"), nullable=False, index=True
     )
-    member_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("members.id"), nullable=False, index=True
+    member_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("members.id"), nullable=True, index=True
+    )
+    group_admin_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("group_admins.id"), nullable=True, index=True
     )
 
     invoice_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)

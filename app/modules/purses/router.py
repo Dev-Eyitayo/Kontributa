@@ -276,10 +276,16 @@ async def list_contributions(
     # has one. Mirrors audit/router.py::get_payout_audit's pattern.
     user_row = await db.get(User, current_user.id)
     purse = await purse_service.get_by_id(purse_id)
+    # None for a platform admin (no GroupAdmin row anywhere) -- is_mine
+    # below is correctly always False for them then, same as it would be
+    # for any admin looking at a purse belonging to a group they don't
+    # personally administer.
+    viewing_admin_id = None
     if user_row is not None and user_row.is_platform_admin:
         pass
     else:
-        await admin_service.get_admin_for_group(current_user.id, purse.group_id)
+        admin = await admin_service.get_admin_for_group(current_user.id, purse.group_id)
+        viewing_admin_id = admin.id
 
     rows, total = await contribution_service.list_for_purse(
         purse_id, status, limit, offset, purse_status=purse.status.value
@@ -288,16 +294,27 @@ async def list_contributions(
         {
             "items": [
                 {
-                    "id": str(contribution.id),
-                    "member_id": str(member.id),
-                    "name": f"{user.first_name} {user.last_name}",
-                    "member_id_number": member.member_id_number,
-                    "status": contribution.status.value,
-                    "display_status": compute_display_status(contribution.status.value, purse.status.value),
-                    "amount_received": str(contribution.amount_received),
-                    "paid_at": contribution.paid_at.isoformat() if contribution.paid_at else None,
+                    "id": str(row.contribution.id),
+                    "member_id": str(row.contribution.member_id) if row.contribution.member_id else None,
+                    "group_admin_id": str(row.contribution.group_admin_id) if row.contribution.group_admin_id else None,
+                    "owner_type": row.owner_type,
+                    # Whether the row belongs to the admin who's currently
+                    # looking at it -- the one thing the frontend needs to
+                    # know to show a self-service "Pay now" action on its
+                    # own row, same as a member would see on theirs,
+                    # without needing to separately fetch its own
+                    # group_admin_id just to compare.
+                    "is_mine": row.contribution.group_admin_id == viewing_admin_id
+                    if viewing_admin_id is not None
+                    else False,
+                    "name": row.name,
+                    "member_id_number": row.member_id_number,
+                    "status": row.contribution.status.value,
+                    "display_status": compute_display_status(row.contribution.status.value, purse.status.value),
+                    "amount_received": str(row.contribution.amount_received),
+                    "paid_at": row.contribution.paid_at.isoformat() if row.contribution.paid_at else None,
                 }
-                for contribution, member, user in rows
+                for row in rows
             ],
             "total": total,
             "limit": limit,
@@ -332,11 +349,12 @@ async def list_contributions_for_member(
         {
             "items": [
                 {
-                    "name": f"{user.first_name} {user.last_name}",
-                    "status": contribution.status.value,
-                    "display_status": compute_display_status(contribution.status.value, purse.status.value),
+                    "name": row.name,
+                    "owner_type": row.owner_type,
+                    "status": row.contribution.status.value,
+                    "display_status": compute_display_status(row.contribution.status.value, purse.status.value),
                 }
-                for contribution, _member, user in rows
+                for row in rows
             ],
             "total": total,
             "limit": limit,

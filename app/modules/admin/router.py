@@ -84,7 +84,8 @@ async def list_flagged_contributions(
                 {
                     "id": str(c.id),
                     "purse_id": str(c.purse_id),
-                    "member_id": str(c.member_id),
+                    "member_id": str(c.member_id) if c.member_id is not None else None,
+                    "group_admin_id": str(c.group_admin_id) if c.group_admin_id is not None else None,
                     "amount_expected": str(c.amount_expected),
                     "amount_received": str(c.amount_received),
                 }

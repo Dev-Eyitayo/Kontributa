@@ -92,14 +92,23 @@ async def test_create_purse_generates_pending_contributions_for_existing_members
     contributions = await client.get(f"/purses/{purse_id}/contributions", headers=headers)
     assert contributions.status_code == 200
     rows = contributions.json()["data"]["items"]
-    assert len(rows) == 1
-    assert rows[0]["status"] == "pending"
-    assert rows[0]["amount_received"] == "0.00"
-    # transparency view must never leak more than name + member_id_number
+    # One row for the member who joined, one for the group's own admin --
+    # purse creation eagerly snapshots both now.
+    assert len(rows) == 2
+    member_row = next(r for r in rows if r["owner_type"] == "member")
+    admin_row = next(r for r in rows if r["owner_type"] == "admin")
+    assert member_row["status"] == "pending"
+    assert member_row["amount_received"] == "0.00"
+    assert admin_row["status"] == "pending"
+    assert admin_row["amount_received"] == "0.00"
+    # transparency view must never leak more than these fields
 
-    assert set(rows[0].keys()) == {
+    assert set(member_row.keys()) == {
         "id",
         "member_id",
+        "group_admin_id",
+        "owner_type",
+        "is_mine",
         "name",
         "member_id_number",
         "status",
@@ -130,7 +139,9 @@ async def test_snapshot_purse_does_not_include_latecomers(client, db_session):
     late_member_headers = await _invite_and_join_member(client, headers, group.id, email="late@example.com")
 
     summary = await client.get(f"/purses/{purse_id}/summary", headers=headers)
-    assert summary.json()["data"]["pending_count"] == 1
+    # The one early member, plus the group's own admin -- the late
+    # member below must NOT bump this on a snapshot purse.
+    assert summary.json()["data"]["pending_count"] == 2
 
     late_purses = await client.get("/members/me/purses", headers=late_member_headers)
     assert late_purses.json()["data"] == []
@@ -150,7 +161,9 @@ async def test_auto_enroll_purse_includes_future_joiners(client, db_session):
     late_member_headers = await _invite_and_join_member(client, headers, group.id, email="late@example.com")
 
     summary = await client.get(f"/purses/{purse_id}/summary", headers=headers)
-    assert summary.json()["data"]["pending_count"] == 2
+    # Early member + the group's own admin at creation time, plus the
+    # late member auto-enroll picks up afterward.
+    assert summary.json()["data"]["pending_count"] == 3
 
     late_purses = await client.get("/members/me/purses", headers=late_member_headers)
     assert late_purses.json()["data"][0]["purse_id"] == purse_id
@@ -673,9 +686,10 @@ async def test_purse_contributions_pagination(client, db_session):
 
     first_page = await client.get(f"/purses/{purse_id}/contributions?limit=2&offset=0", headers=headers)
     body = first_page.json()["data"]
-    assert body["total"] == 3
+    # 3 members + the group's own admin.
+    assert body["total"] == 4
     assert len(body["items"]) == 2
 
     second_page = await client.get(f"/purses/{purse_id}/contributions?limit=2&offset=2", headers=headers)
     body_2 = second_page.json()["data"]
-    assert len(body_2["items"]) == 1
+    assert len(body_2["items"]) == 2

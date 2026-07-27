@@ -9,7 +9,11 @@ from pydantic import BaseModel, Field
 class ContributionDetailResponse(BaseModel):
     id: UUID
     purse_id: UUID
-    member_id: UUID
+    # Exactly one of these two is ever set -- see
+    # Contribution.ck_contribution_exactly_one_owner.
+    member_id: Optional[UUID] = None
+    group_admin_id: Optional[UUID] = None
+    owner_type: Literal["member", "admin"]
     status: str
     # Display-layer only -- see compute_display_status's docstring. status
     # above stays the real, unmassaged value.

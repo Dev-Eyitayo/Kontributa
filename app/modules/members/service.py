@@ -8,10 +8,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import SingleUseTokenStore
 from app.core.config import settings
-from app.core.exceptions import ConflictError, NotFoundError, ValidationAppError
+from app.core.exceptions import BusinessRuleError, ConflictError, NotFoundError, ValidationAppError
 from app.core.security import hash_password
 from app.modules.auth.models import User
 from app.modules.contributions.service import ContributionService
+from app.modules.group_admins.models import GroupAdmin
 from app.modules.invites.service import InviteService
 from app.modules.members.models import Member, VerificationStatus
 from app.modules.members.schemas import JoinRequest, MemberUpdateRequest
@@ -195,6 +196,28 @@ class MemberService:
         existing = await self.get_by_user_and_group(user_id, invite.group_id)
         if existing is not None:
             raise ConflictError("already a member of this group", code="duplicate_email")
+
+        # Dual identity is fine (admin-of-A plus member-of-B), but not for
+        # the *same* group -- an active GroupAdmin already has full control
+        # over this group, so also holding a Member row here would be a
+        # confusing, self-referential relationship rather than a genuine
+        # second identity. Both authenticated entry points to this method
+        # (the invite page's confirm-and-join, and its login-then-join
+        # pivot) share this one check.
+        admin_of_this_group = (
+            await self.db.execute(
+                select(GroupAdmin.id).where(
+                    GroupAdmin.user_id == user_id,
+                    GroupAdmin.group_id == invite.group_id,
+                    GroupAdmin.is_active_admin.is_(True),
+                )
+            )
+        ).scalar_one_or_none()
+        if admin_of_this_group is not None:
+            raise BusinessRuleError(
+                "You already manage this group — you can't also join it as a member.",
+                code="admin_cannot_join_own_group",
+            )
 
         member = Member(
             user_id=user_id,

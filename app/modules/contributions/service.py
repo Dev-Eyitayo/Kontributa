@@ -1,13 +1,14 @@
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from typing import Optional
+from typing import Literal, Optional
 from uuid import UUID, uuid4
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.core.exceptions import BusinessRuleError, NotFoundError
+from app.core.exceptions import BusinessRuleError, ForbiddenError, NotFoundError
 from app.modules.audit.models import AuditActorType
 from app.modules.audit.service import AuditService
 from app.modules.auth.models import User
@@ -21,6 +22,38 @@ from app.modules.platform_settings.service import PlatformSettingsService
 from app.modules.purses.models import EnrollMode, Purse, PurseStatus
 from app.modules.realtime.service import RealtimeService, contribution_channel_name
 from app.modules.settlement.models import SettlementAccount, SettlementMode
+
+
+@dataclass
+class ContributionRow:
+    """A single "who has paid" row, resolved down to a display name --
+    the whole point being that a caller (the transparency table, the CSV/
+    PDF export, ...) never needs to know or care whether the underlying
+    Contribution is Member-owned or GroupAdmin-owned; both render through
+    this exact same shape. member_id_number is None for an admin-owned
+    row -- there's no such concept for a GroupAdmin."""
+
+    contribution: Contribution
+    name: str
+    member_id_number: Optional[str]
+    owner_type: Literal["member", "admin"]
+
+
+def _combine_owner_rows(
+    member_rows: list[tuple[Contribution, Member, User]],
+    admin_rows: list[tuple[Contribution, GroupAdmin, User]],
+) -> list[ContributionRow]:
+    combined = [
+        ContributionRow(
+            contribution=c, name=f"{u.first_name} {u.last_name}", member_id_number=m.member_id_number, owner_type="member"
+        )
+        for c, m, u in member_rows
+    ] + [
+        ContributionRow(contribution=c, name=f"{u.first_name} {u.last_name}", member_id_number=None, owner_type="admin")
+        for c, _admin, u in admin_rows
+    ]
+    combined.sort(key=lambda row: row.contribution.created_at)
+    return combined
 
 _AUDIT_ACTOR_MAP = {
     ActorType.WEBHOOK: AuditActorType.WEBHOOK,
@@ -54,15 +87,36 @@ class ContributionService:
     async def generate_for_purse(self, purse: Purse) -> list[Contribution]:
         """Called once, at purse creation. Snapshots every currently-eligible
         member regardless of enroll_mode -- auto_enroll purses additionally
-        pick up future joiners via generate_for_new_member."""
+        pick up future joiners via generate_for_new_member. Also snapshots
+        every active GroupAdmin of the group -- an admin contributing to
+        their own group's purse is just another Contribution row, not a
+        separate table or concept. Unlike members, admins are never
+        cohort-filtered: a GroupAdmin administers the whole group, not one
+        cohort within it, so every active co-admin gets a row regardless
+        of the purse's own cohort."""
         stmt = select(Member).where(Member.group_id == purse.group_id)
         if purse.cohort is not None:
             stmt = stmt.where(Member.cohort == purse.cohort)
 
         members = (await self.db.execute(stmt)).scalars().all()
+        admins = (
+            (
+                await self.db.execute(
+                    select(GroupAdmin).where(
+                        GroupAdmin.group_id == purse.group_id, GroupAdmin.is_active_admin.is_(True)
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+
         rows = [
             Contribution(purse_id=purse.id, member_id=member.id, amount_expected=purse.amount)
             for member in members
+        ] + [
+            Contribution(purse_id=purse.id, group_admin_id=admin.id, amount_expected=purse.amount)
+            for admin in admins
         ]
         if rows:
             self.db.add_all(rows)
@@ -132,6 +186,21 @@ class ContributionService:
         if rows:
             await self.db.commit()
 
+    def _member_and_admin_statements(self, purse_id: UUID):
+        member_stmt = (
+            select(Contribution, Member, User)
+            .join(Member, Contribution.member_id == Member.id)
+            .join(User, Member.user_id == User.id)
+            .where(Contribution.purse_id == purse_id)
+        )
+        admin_stmt = (
+            select(Contribution, GroupAdmin, User)
+            .join(GroupAdmin, Contribution.group_admin_id == GroupAdmin.id)
+            .join(User, GroupAdmin.user_id == User.id)
+            .where(Contribution.purse_id == purse_id)
+        )
+        return member_stmt, admin_stmt
+
     async def list_for_purse(
         self,
         purse_id: UUID,
@@ -139,40 +208,42 @@ class ContributionService:
         limit: int = 20,
         offset: int = 0,
         purse_status: Optional[str] = None,
-    ) -> tuple[list[tuple[Contribution, Member, User]], int]:
-        stmt = (
-            select(Contribution, Member, User)
-            .join(Member, Contribution.member_id == Member.id)
-            .join(User, Member.user_id == User.id)
-            .where(Contribution.purse_id == purse_id)
-        )
+    ) -> tuple[list[ContributionRow], int]:
+        member_stmt, admin_stmt = self._member_and_admin_statements(purse_id)
+
         if status == ContributionStatus.PENDING.value and purse_status == PurseStatus.OPEN.value:
             # Mirrors compute_display_status: on an open purse, an expired
             # invoice reads as "pending" everywhere in the UI (it's one tap
             # from being paid), so the "pending" filter must surface it too
             # -- otherwise it silently vanishes from every filtered view
             # while still being counted as pending in the badge/summary.
-            stmt = stmt.where(Contribution.status.in_([ContributionStatus.PENDING, ContributionStatus.EXPIRED]))
+            status_filter = Contribution.status.in_([ContributionStatus.PENDING, ContributionStatus.EXPIRED])
+            member_stmt = member_stmt.where(status_filter)
+            admin_stmt = admin_stmt.where(status_filter)
         elif status is not None:
-            stmt = stmt.where(Contribution.status == status)
+            member_stmt = member_stmt.where(Contribution.status == status)
+            admin_stmt = admin_stmt.where(Contribution.status == status)
 
-        total = (await self.db.execute(select(func.count()).select_from(stmt.subquery()))).scalar_one()
-        result = await self.db.execute(stmt.order_by(Contribution.created_at).limit(limit).offset(offset))
-        return [(row[0], row[1], row[2]) for row in result.all()], total
+        member_rows = (await self.db.execute(member_stmt)).all()
+        admin_rows = (await self.db.execute(admin_stmt)).all()
+        # Combined and paginated in Python rather than at the SQL level --
+        # a purse's admin rows are always a handful (co-admins of one
+        # group), so fetching both sets in full and slicing here stays
+        # cheap while keeping one consistent (Contribution.created_at)
+        # ordering across both owner types, which a SQL-level UNION across
+        # two differently-shaped joins would need much more machinery to
+        # express cleanly.
+        combined = _combine_owner_rows(member_rows, admin_rows)
+        return combined[offset : offset + limit], len(combined)
 
-    async def list_all_for_purse(self, purse_id: UUID) -> list[tuple[Contribution, Member, User]]:
+    async def list_all_for_purse(self, purse_id: UUID) -> list[ContributionRow]:
         """Every contribution for a purse, unpaginated -- for the
         contribution report export, which needs the complete set in one
         pass rather than a page at a time."""
-        stmt = (
-            select(Contribution, Member, User)
-            .join(Member, Contribution.member_id == Member.id)
-            .join(User, Member.user_id == User.id)
-            .where(Contribution.purse_id == purse_id)
-            .order_by(Contribution.created_at)
-        )
-        result = await self.db.execute(stmt)
-        return [(row[0], row[1], row[2]) for row in result.all()]
+        member_stmt, admin_stmt = self._member_and_admin_statements(purse_id)
+        member_rows = (await self.db.execute(member_stmt)).all()
+        admin_rows = (await self.db.execute(admin_stmt)).all()
+        return _combine_owner_rows(member_rows, admin_rows)
 
     async def summary_for_purse(self, purse_id: UUID, purse_status: str) -> dict:
         stmt = select(Contribution.status, func.count(), func.coalesce(func.sum(Contribution.amount_received), 0)).where(
@@ -310,6 +381,33 @@ class ContributionService:
             raise NotFoundError("contribution not found")
         return contribution
 
+    async def resolve_and_assert_owner(self, user_id: UUID, contribution: Contribution) -> User:
+        """Self-service ownership check for whichever owner type this
+        contribution actually has -- shared by generate-invoice and the
+        realtime token endpoint, both "pay/watch my OWN contribution"
+        actions regardless of whether "my own" means a Member row or a
+        GroupAdmin row. Resolved via the contribution's own member_id/
+        group_admin_id, then checked against the caller -- not
+        current_user.role, which only ever reflects whichever identity
+        was true at login and would wrongly reject the other one for a
+        dual-identity account."""
+        if contribution.member_id is not None:
+            member = await self.db.get(Member, contribution.member_id)
+            if member is None or member.user_id != user_id:
+                raise ForbiddenError("cannot access another member's contribution")
+            owner_user = await self.db.get(User, member.user_id)
+        elif contribution.group_admin_id is not None:
+            admin = await self.db.get(GroupAdmin, contribution.group_admin_id)
+            if admin is None or admin.user_id != user_id:
+                raise ForbiddenError("cannot access another admin's contribution")
+            owner_user = await self.db.get(User, admin.user_id)
+        else:
+            owner_user = None
+
+        if owner_user is None:
+            raise ForbiddenError("cannot access this contribution")
+        return owner_user
+
     async def _write_event(
         self,
         contribution: Contribution,
@@ -342,11 +440,23 @@ class ContributionService:
             after_state={"status": to_status.value, "note": note},
         )
 
-    async def _notify_member(
+    async def _resolve_owner_user(self, contribution: Contribution) -> Optional[User]:
+        """The account behind whichever relation is actually populated on
+        this Contribution row -- a Member's own user, or a GroupAdmin's
+        own user. Never both, never neither (see the model's
+        ck_contribution_exactly_one_owner constraint)."""
+        if contribution.member_id is not None:
+            member = await self.db.get(Member, contribution.member_id)
+            return await self.db.get(User, member.user_id) if member is not None else None
+        if contribution.group_admin_id is not None:
+            admin = await self.db.get(GroupAdmin, contribution.group_admin_id)
+            return await self.db.get(User, admin.user_id) if admin is not None else None
+        return None
+
+    async def _notify_owner(
         self, contribution: Contribution, notifications: NotificationService, template_name: str, subject: str, context: dict
     ) -> None:
-        member = await self.db.get(Member, contribution.member_id)
-        user = await self.db.get(User, member.user_id) if member is not None else None
+        user = await self._resolve_owner_user(contribution)
         if user is None:
             return
         await notifications.send(
@@ -409,7 +519,7 @@ class ContributionService:
             if notifications is not None:
                 purse = await self.db.get(Purse, contribution.purse_id)
                 if purse is not None:
-                    await self._notify_member(
+                    await self._notify_owner(
                         contribution,
                         notifications,
                         "contribution_expired.html",
@@ -425,8 +535,7 @@ class ContributionService:
         self,
         contribution: Contribution,
         monnify: MonnifyClient,
-        member: Member,
-        member_user: User,
+        owner_user: User,
         purse: Purse,
         notifications: Optional[NotificationService] = None,
         platform_settings: Optional[PlatformSettingsService] = None,
@@ -505,8 +614,8 @@ class ContributionService:
         invoice = await monnify.create_invoice(
             invoice_reference=invoice_reference,
             amount=outstanding,
-            customer_name=f"{member_user.first_name} {member_user.last_name}",
-            customer_email=member_user.email,
+            customer_name=f"{owner_user.first_name} {owner_user.last_name}",
+            customer_email=owner_user.email,
             description=purse.title,
             expires_at=expires_at,
             income_split_config=income_split_config,
@@ -577,7 +686,7 @@ class ContributionService:
         if notifications is not None and contribution.status == ContributionStatus.PAID:
             purse = await self.db.get(Purse, contribution.purse_id)
             if purse is not None:
-                await self._notify_member(
+                await self._notify_owner(
                     contribution,
                     notifications,
                     "payment_receipt.html",

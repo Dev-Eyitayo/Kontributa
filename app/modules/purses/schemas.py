@@ -53,7 +53,17 @@ class AddMemberToPurseResponse(BaseModel):
 
 class ContributionListItem(BaseModel):
     id: UUID
-    member_id: UUID
+    # Exactly one of member_id/owner_type=="member" is ever set -- an
+    # admin contributing to their own group's purse is just another row
+    # in this same list (see Contribution.group_admin_id), never a
+    # separate section. member_id_number is likewise None for an
+    # owner_type=="admin" row -- there's no such concept for a GroupAdmin.
+    member_id: Optional[UUID] = None
+    group_admin_id: Optional[UUID] = None
+    owner_type: Literal["member", "admin"]
+    # Whether this row belongs to the admin currently viewing the list --
+    # the signal for showing a self-service "Pay now" action on it.
+    is_mine: bool = False
     name: str
     member_id_number: Optional[str] = None
     status: str
@@ -70,9 +80,12 @@ class MemberVisibleContributionItem(BaseModel):
     """The full-transparency view any member of a purse's group can see --
     deliberately thinner than ContributionListItem (the admin dispute-
     resolution shape): name and status only, no amounts, no flag/manual-
-    payment notes, no ids."""
+    payment notes, no ids. owner_type is the one addition purely so the
+    frontend can show an inline "(Admin)" label next to that row's name --
+    same table, same columns, no separate section."""
 
     name: str
+    owner_type: Literal["member", "admin"]
     status: str
     display_status: str
 

@@ -25,7 +25,11 @@ class WebhookEventListItem(BaseModel):
 class FlaggedContributionItem(BaseModel):
     id: UUID
     purse_id: UUID
-    member_id: UUID
+    # Exactly one of these two is ever set -- an admin's own contribution
+    # to their group's purse can be flagged for review too, same as any
+    # member's.
+    member_id: Optional[UUID] = None
+    group_admin_id: Optional[UUID] = None
     # Money is always a string on the wire (never a bare JSON number, to
     # avoid float precision loss) -- see known-limitations.md.
     amount_expected: str

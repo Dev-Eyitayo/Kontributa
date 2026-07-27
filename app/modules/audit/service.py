@@ -318,7 +318,12 @@ class AuditService:
 
         labels: dict[UUID, str] = {}
         if contribution_ids:
-            rows = (
+            # Two queries, not one join -- a contribution belongs to
+            # either a Member or a GroupAdmin, never both (see
+            # Contribution.ck_contribution_exactly_one_owner), so an
+            # INNER JOIN through Member alone would silently drop every
+            # admin-owned contribution's label.
+            member_rows = (
                 await self.db.execute(
                     select(Contribution.id, User.first_name, User.last_name)
                     .join(Member, Contribution.member_id == Member.id)
@@ -326,7 +331,15 @@ class AuditService:
                     .where(Contribution.id.in_(contribution_ids))
                 )
             ).all()
-            labels.update({row[0]: f"{row[1]} {row[2]}'s contribution" for row in rows})
+            admin_rows = (
+                await self.db.execute(
+                    select(Contribution.id, User.first_name, User.last_name)
+                    .join(GroupAdmin, Contribution.group_admin_id == GroupAdmin.id)
+                    .join(User, GroupAdmin.user_id == User.id)
+                    .where(Contribution.id.in_(contribution_ids))
+                )
+            ).all()
+            labels.update({row[0]: f"{row[1]} {row[2]}'s contribution" for row in [*member_rows, *admin_rows]})
         if payout_ids:
             rows = (
                 await self.db.execute(select(Payout.id, Payout.amount).where(Payout.id.in_(payout_ids)))

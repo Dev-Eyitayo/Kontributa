@@ -47,7 +47,9 @@ def _contribution_out(c: Contribution, purse: Purse) -> dict:
     return {
         "id": str(c.id),
         "purse_id": str(c.purse_id),
-        "member_id": str(c.member_id),
+        "member_id": str(c.member_id) if c.member_id is not None else None,
+        "group_admin_id": str(c.group_admin_id) if c.group_admin_id is not None else None,
+        "owner_type": "member" if c.member_id is not None else "admin",
         "status": c.status.value,
         # Display-layer only -- see compute_display_status's docstring.
         # status above stays the real, unmassaged value.
@@ -66,6 +68,8 @@ async def _assert_member_owns(db: AsyncSession, current_user: CurrentUser, contr
     # which picks arbitrarily among a multi-group member's several Member
     # rows and would wrongly reject a contribution that legitimately
     # belongs to a different one of their groups.
+    if contribution.member_id is None:
+        raise ForbiddenError("this contribution does not belong to a member")
     member = await MemberService(db).get_by_id(contribution.member_id)
     if member.user_id != current_user.id:
         raise ForbiddenError("cannot access another member's contribution")
@@ -108,20 +112,16 @@ async def generate_invoice(
     sendbyte: SendByteClient = Depends(get_sendbyte_client),
     platform_settings: PlatformSettingsService = Depends(get_platform_settings_service),
 ) -> JSONResponse:
-    if current_user.role != "member":
-        raise ForbiddenError("only a member can generate an invoice for their own contribution")
-
     contribution = await service.get_by_id(contribution_id)
-    member = await _assert_member_owns(db, current_user, contribution)
-    member_user = await db.get(User, member.user_id)
+    owner_user = await service.resolve_and_assert_owner(current_user.id, contribution)
     purse = await db.get(Purse, contribution.purse_id)
 
-    if member_user is None or not member_user.is_verified:
+    if not owner_user.is_verified:
         raise ForbiddenError("email verification required before paying", code="email_not_verified")
 
     notifications = NotificationService(db, sendbyte)
     contribution = await service.generate_invoice(
-        contribution, monnify, member, member_user, purse, notifications, platform_settings
+        contribution, monnify, owner_user, purse, notifications, platform_settings
     )
 
     return success_response(

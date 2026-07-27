@@ -111,16 +111,23 @@ async def test_member_can_onboard_as_group_admin(client, db_session):
 async def test_auth_me_reports_dual_identity_flags(client, db_session):
     org, _existing_group = await create_org_and_group(db_session)
     admin_headers = await _register_verify_login(client, "flags-admin@example.com", "group_admin")
-    flags_group = await onboard_group_admin(client, db_session, org, admin_headers, group_name="Flags Group")
+    await onboard_group_admin(client, db_session, org, admin_headers, group_name="Flags Group")
 
     before = await client.get("/auth/me", headers=admin_headers)
     assert before.json()["data"]["has_admin_identity"] is True
     assert before.json()["data"]["has_member_identity"] is False
 
+    # A *different* group -- an admin can't join their own group as a
+    # member (see test_admin_cannot_join_their_own_group_as_a_member), so
+    # this needs a second, unrelated admin's group to join instead.
+    other_admin_headers = await _register_verify_login(client, "flags-other-admin@example.com", "group_admin")
+    other_group = await onboard_group_admin(
+        client, db_session, org, other_admin_headers, group_name="Other Flags Group"
+    )
     invite = await client.post(
-        f"/group-admins/invite-links?group_id={flags_group.id}",
+        f"/group-admins/invite-links?group_id={other_group.id}",
         json={"expires_in_days": 7},
-        headers=admin_headers,
+        headers=other_admin_headers,
     )
     token = invite.json()["data"]["token"]
     join = await client.post(f"/members/join-additional/{token}", json={}, headers=admin_headers)
@@ -214,3 +221,60 @@ async def test_member_without_group_admin_identity_still_forbidden_from_group_ad
 
     resp = await client.get(f"/group-admins/invite-links?group_id={group.id}", headers=member_headers)
     assert resp.status_code == 403
+
+
+async def test_admin_cannot_join_their_own_group_as_a_member(client, db_session):
+    """An active GroupAdmin for Group X must not also be able to hold a
+    Member row for that SAME Group X -- both Scenario A (confirm-join
+    while already logged in) and Scenario B (login-then-join) go through
+    the exact same join_additional_group call, so this one test covers
+    both entry points at once."""
+    org, _existing_group = await create_org_and_group(db_session)
+    admin_headers = await _register_verify_login(client, "self-join-admin@example.com", "group_admin")
+    own_group = await onboard_group_admin(client, db_session, org, admin_headers, group_name="Self Join Group")
+
+    invite = await client.post(
+        f"/group-admins/invite-links?group_id={own_group.id}",
+        json={"expires_in_days": 7},
+        headers=admin_headers,
+    )
+    token = invite.json()["data"]["token"]
+
+    resp = await client.post(f"/members/join-additional/{token}", json={}, headers=admin_headers)
+    assert resp.status_code == 422, resp.text
+    body = resp.json()
+    assert body["error"]["code"] == "admin_cannot_join_own_group"
+    assert "can't also join it as a member" in body["error"]["message"]
+
+    # No Member row was actually created by the rejected attempt.
+    groups = await client.get("/auth/me/groups", headers=admin_headers)
+    assert groups.json()["data"] == [
+        {"group_id": str(own_group.id), "group_name": "Self Join Group", "short_code": own_group.short_code, "role": "admin"}
+    ]
+
+
+async def test_admin_of_one_group_can_still_join_a_different_group_as_member(client, db_session):
+    """Confirms the self-join block above is scoped to the SAME group
+    only -- admin-of-A plus member-of-B must remain completely
+    unaffected (already covered more broadly by
+    test_group_admin_can_join_another_group_as_member; this test asserts
+    it specifically alongside the new block to guard against the check
+    accidentally being too broad)."""
+    org, _existing_group = await create_org_and_group(db_session)
+    admin_headers = await _register_verify_login(client, "cross-group-admin@example.com", "group_admin")
+    await onboard_group_admin(client, db_session, org, admin_headers, group_name="Admin's Group")
+
+    other_admin_headers = await _register_verify_login(client, "cross-group-other-admin@example.com", "group_admin")
+    other_group = await onboard_group_admin(
+        client, db_session, org, other_admin_headers, group_name="A Different Group"
+    )
+
+    invite = await client.post(
+        f"/group-admins/invite-links?group_id={other_group.id}",
+        json={"expires_in_days": 7},
+        headers=other_admin_headers,
+    )
+    token = invite.json()["data"]["token"]
+
+    resp = await client.post(f"/members/join-additional/{token}", json={}, headers=admin_headers)
+    assert resp.status_code == 201, resp.text

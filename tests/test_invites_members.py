@@ -427,6 +427,84 @@ async def test_join_additional_group_allows_a_group_admin_account_too(client, db
     assert resp.json()["data"]["group_id"] == str(other_group.id)
 
 
+async def test_update_me_member_id_number_is_scoped_per_group_not_global(client, db_session):
+    """Regression test: member_id_number lives on the specific (user, group)
+    Member row, not the account -- PATCH /members/me?group_id=... must only
+    ever touch that one membership's number, never bleed into a different
+    group's membership for the same user. first_name/last_name, by
+    contrast, live on the shared User row and must change everywhere
+    regardless of which group_id the request was scoped to."""
+    token_a, org_a, group_a = await _create_invite_link(client, db_session)
+    join = await client.post(
+        f"/members/join/{token_a}",
+        json={
+            "email": "multi-group-id@example.com",
+            "password": "password123",
+            "first_name": "Multi",
+            "last_name": "Group",
+            "member_id_number": "A-001",
+        },
+    )
+    assert join.status_code == 201
+
+    verify_token = await find_redis_token("verify_email")
+    await client.post("/auth/verify-email", json={"email": "multi-group-id@example.com", "token": verify_token})
+    login = await client.post(
+        "/auth/login", json={"email": "multi-group-id@example.com", "password": "password123"}
+    )
+    member_headers = {"Authorization": f"Bearer {login.json()['data']['access_token']}"}
+
+    org_b, _existing_group_b = await create_org_and_group(
+        db_session, org_name="Group B Uni", org_short_code="GB1", group_name="Group B Dept", group_short_code="GB1D"
+    )
+    token_b, _, group_b = await _create_invite_link(client, db_session, org=org_b, admin_email="rep-gb@example.com")
+    join_b = await client.post(
+        f"/members/join-additional/{token_b}",
+        json={"member_id_number": "B-001"},
+        headers=member_headers,
+    )
+    assert join_b.status_code == 201
+
+    # Editing group A's id number must not touch group B's.
+    update_a = await client.patch(
+        f"/members/me?group_id={group_a.id}",
+        json={"member_id_number": "A-002"},
+        headers=member_headers,
+    )
+    assert update_a.status_code == 200
+    assert update_a.json()["data"]["member_id_number"] == "A-002"
+
+    me_a = await client.get(f"/members/me?group_id={group_a.id}", headers=member_headers)
+    me_b = await client.get(f"/members/me?group_id={group_b.id}", headers=member_headers)
+    assert me_a.json()["data"]["member_id_number"] == "A-002"
+    assert me_b.json()["data"]["member_id_number"] == "B-001"
+
+    # And vice versa -- editing group B's must not touch group A's.
+    update_b = await client.patch(
+        f"/members/me?group_id={group_b.id}",
+        json={"member_id_number": "B-002"},
+        headers=member_headers,
+    )
+    assert update_b.status_code == 200
+    assert update_b.json()["data"]["member_id_number"] == "B-002"
+
+    me_a_again = await client.get(f"/members/me?group_id={group_a.id}", headers=member_headers)
+    me_b_again = await client.get(f"/members/me?group_id={group_b.id}", headers=member_headers)
+    assert me_a_again.json()["data"]["member_id_number"] == "A-002"
+    assert me_b_again.json()["data"]["member_id_number"] == "B-002"
+
+    # Name changes are global -- updating via either group_id changes the
+    # one shared User row, visible from both memberships.
+    rename = await client.patch(
+        f"/members/me?group_id={group_a.id}",
+        json={"first_name": "Renamed"},
+        headers=member_headers,
+    )
+    assert rename.status_code == 200
+    me_b_after_rename = await client.get(f"/members/me?group_id={group_b.id}", headers=member_headers)
+    assert me_b_after_rename.json()["data"]["first_name"] == "Renamed"
+
+
 async def test_members_me_purses_includes_contribution_id(client, db_session):
     token, org, group = await _create_invite_link(client, db_session)
     join = await client.post(
@@ -490,3 +568,93 @@ async def test_members_me_purses_includes_contribution_id(client, db_session):
     )
     assert contribution.status_code == 200
     assert contribution.json()["data"]["purse_id"] == body[0]["purse_id"]
+
+
+async def test_members_me_purses_can_be_scoped_to_one_group(client, db_session):
+    """Regression test: the Member-side group switcher's selection must be
+    able to narrow this list down to one group's purses -- by default (no
+    group_id) it still spans every group this user is a Member of, but a
+    caller that knows which group is currently active (the switcher) can
+    ask for just that one instead."""
+    from datetime import datetime, timedelta, timezone
+
+    org_a, _existing_group_a = await create_org_and_group(
+        db_session, org_name="Scope Uni A", org_short_code="SCA", group_name="Scope Dept A", group_short_code="SCAD"
+    )
+    admin_a_token = await _register_and_login_group_admin(client, email="scope-admin-a@example.com")
+    admin_a_headers = {"Authorization": f"Bearer {admin_a_token}"}
+    group_a = await onboard_group_admin(client, db_session, org_a, admin_a_headers, group_name="Scope Dept A")
+
+    invite_a = await client.post(
+        f"/group-admins/invite-links?group_id={group_a.id}", json={"expires_in_days": 7}, headers=admin_a_headers
+    )
+    token_a = invite_a.json()["data"]["token"]
+
+    join = await client.post(
+        f"/members/join/{token_a}",
+        json={
+            "email": "scope-member@example.com",
+            "password": "password123",
+            "first_name": "Scope",
+            "last_name": "Member",
+        },
+    )
+    assert join.status_code == 201
+    verify_token = await find_redis_token("verify_email")
+    await client.post("/auth/verify-email", json={"email": "scope-member@example.com", "token": verify_token})
+    login = await client.post("/auth/login", json={"email": "scope-member@example.com", "password": "password123"})
+    member_headers = {"Authorization": f"Bearer {login.json()['data']['access_token']}"}
+
+    await client.post(
+        "/purses",
+        json={
+            "group_id": str(group_a.id),
+            "title": "Group A Dues",
+            "amount": "500.00",
+            "deadline": (datetime.now(timezone.utc) + timedelta(days=7)).isoformat(),
+            "enroll_mode": "auto_enroll",
+        },
+        headers=admin_a_headers,
+    )
+
+    org_b, _existing_group_b = await create_org_and_group(
+        db_session, org_name="Scope Uni B", org_short_code="SCB", group_name="Scope Dept B", group_short_code="SCBD"
+    )
+    admin_b_token = await _register_and_login_group_admin(client, email="scope-admin-b@example.com")
+    admin_b_headers = {"Authorization": f"Bearer {admin_b_token}"}
+    group_b = await onboard_group_admin(client, db_session, org_b, admin_b_headers, group_name="Scope Dept B")
+
+    invite_b = await client.post(
+        f"/group-admins/invite-links?group_id={group_b.id}", json={"expires_in_days": 7}, headers=admin_b_headers
+    )
+    token_b = invite_b.json()["data"]["token"]
+
+    join_b = await client.post(f"/members/join-additional/{token_b}", json={}, headers=member_headers)
+    assert join_b.status_code == 201
+
+    await client.post(
+        "/purses",
+        json={
+            "group_id": str(group_b.id),
+            "title": "Group B Dues",
+            "amount": "700.00",
+            "deadline": (datetime.now(timezone.utc) + timedelta(days=7)).isoformat(),
+            "enroll_mode": "auto_enroll",
+        },
+        headers=admin_b_headers,
+    )
+
+    all_purses = await client.get("/members/me/purses", headers=member_headers)
+    assert all_purses.status_code == 200
+    all_titles = {p["title"] for p in all_purses.json()["data"]}
+    assert all_titles == {"Group A Dues", "Group B Dues"}
+
+    only_a = await client.get(f"/members/me/purses?group_id={group_a.id}", headers=member_headers)
+    assert only_a.status_code == 200
+    a_titles = {p["title"] for p in only_a.json()["data"]}
+    assert a_titles == {"Group A Dues"}
+
+    only_b = await client.get(f"/members/me/purses?group_id={group_b.id}", headers=member_headers)
+    assert only_b.status_code == 200
+    b_titles = {p["title"] for p in only_b.json()["data"]}
+    assert b_titles == {"Group B Dues"}

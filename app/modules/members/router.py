@@ -139,12 +139,15 @@ async def update_me(
 
 @router.get("/me/purses", response_model=StandardResponse[list[MemberPurseListItem]])
 async def list_my_purses(
+    group_id: Optional[UUID] = Query(default=None),
     current_user: CurrentUser = Depends(get_current_member_user),
     contribution_service: ContributionService = Depends(get_contribution_service),
 ) -> JSONResponse:
-    # Spans every group this user is a Member of, not just one -- see
-    # ContributionService.list_purses_for_user's docstring.
-    rows = await contribution_service.list_purses_for_user(current_user.id)
+    # Narrowed to group_id when given -- the Member side's group switcher's
+    # current selection. Omitted, this still spans every group this user
+    # is a Member of -- see ContributionService.list_purses_for_user's
+    # docstring.
+    rows = await contribution_service.list_purses_for_user(current_user.id, group_id)
     return success_response(
         [
             {

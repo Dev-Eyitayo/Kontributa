@@ -277,13 +277,20 @@ class ContributionService:
         result = await self.db.execute(stmt)
         return [(row[0], row[1]) for row in result.all()]
 
-    async def list_purses_for_user(self, user_id: UUID) -> list[tuple[Contribution, Purse, Group]]:
+    async def list_purses_for_user(
+        self, user_id: UUID, group_id: Optional[UUID] = None
+    ) -> list[tuple[Contribution, Purse, Group]]:
         """Every purse across *every* group this user is a Member of --
         list_member_purses above is scoped to one Member row, which used to
         be the only kind a user could have. Joins through Member (rather
         than taking a member_id) specifically so a member in more than one
         group sees every group's purses in one response, each still
-        resolvable back to which group it came from via the returned Group."""
+        resolvable back to which group it came from via the returned Group.
+
+        group_id optionally narrows this to a single group -- the Member
+        side's group switcher's current selection (see current-member-
+        group.tsx on the frontend). Omitted, this still spans every group,
+        which is what the switcher-less callers (if any remain) get."""
         stmt = (
             select(Contribution, Purse, Group)
             .join(Member, Contribution.member_id == Member.id)
@@ -292,6 +299,8 @@ class ContributionService:
             .where(Member.user_id == user_id)
             .order_by(Purse.deadline.asc())
         )
+        if group_id is not None:
+            stmt = stmt.where(Group.id == group_id)
         result = await self.db.execute(stmt)
         return [(row[0], row[1], row[2]) for row in result.all()]
 

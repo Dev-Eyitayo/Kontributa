@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -109,11 +109,12 @@ class OrganizationService:
 
     async def update_group(self, group_id: UUID, payload: AdminUpdateGroupRequest, actor_id: UUID) -> Group:
         """Platform-admin edit of any group, unscoped by which admin
-        manages it. Changing cohort here is NOT retroactive -- same rule
-        as the group admin's own update_group (see Group.cohort):
-        already-joined members and already-created purses keep whatever
-        cohort they had at the time; only members who join, and purses
-        created, after this call inherit the new value."""
+        manages it. Changing cohort here cascades onto every active
+        member immediately -- same rule as the group admin's own
+        update_group (see Group.cohort and GroupAdminService.update_group).
+        An already-created purse's own stored cohort is a separate,
+        deliberate snapshot, untouched by this; only purses created after
+        this call inherit the new value."""
         group = await self.get_group(group_id)
 
         before_state = {"name": group.name, "short_code": group.short_code, "cohort": group.cohort}
@@ -123,6 +124,9 @@ class OrganizationService:
             group.short_code = payload.short_code
         if payload.cohort is not None:
             group.cohort = payload.cohort
+            await self.db.execute(
+                update(Member).where(Member.group_id == group_id, Member.removed_at.is_(None)).values(cohort=payload.cohort)
+            )
         after_state = {"name": group.name, "short_code": group.short_code, "cohort": group.cohort}
 
         if after_state != before_state:

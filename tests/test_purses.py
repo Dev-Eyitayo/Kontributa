@@ -560,28 +560,30 @@ async def test_add_member_to_purse_rejects_duplicate_enrollment(client, db_sessi
 
 
 async def test_add_member_to_purse_rejects_cohort_mismatch(client, db_session):
-    # Cohort mismatches now arise from the group's cohort changing over
-    # time, not a per-invite/per-purse override -- a member who joined
-    # under the old cohort keeps it (not retroactive), and a purse created
-    # after the change inherits the new one, so the two disagree.
+    # A purse's own stored cohort is a snapshot, never retroactively
+    # updated (unlike a member's own cohort, which now cascades
+    # immediately with the group's -- see GroupAdminService.update_group).
+    # So a mismatch now arises from an *older* purse predating a later
+    # cohort change, not a per-invite/per-purse override.
     org, group, headers = await _setup_group_with_admin(client, db_session)
 
     patch_300 = await client.patch(f"/groups/{group.id}", json={"cohort": "300"}, headers=headers)
     assert patch_300.status_code == 200
 
-    late_member_headers = await _invite_and_join_member(client, headers, group.id, email="wrongcohort@example.com")
-    member_me = await client.get("/members/me", headers=late_member_headers)
-    member_id = member_me.json()["data"]["id"]
+    create = await client.post(
+        "/purses",
+        json=_purse_payload(group.id, title="300L Dues"),
+        headers=headers,
+    )
+    purse_id = create.json()["data"]["id"]
 
     patch_400 = await client.patch(f"/groups/{group.id}", json={"cohort": "400"}, headers=headers)
     assert patch_400.status_code == 200
 
-    create = await client.post(
-        "/purses",
-        json=_purse_payload(group.id, title="400L Dues"),
-        headers=headers,
-    )
-    purse_id = create.json()["data"]["id"]
+    late_member_headers = await _invite_and_join_member(client, headers, group.id, email="wrongcohort@example.com")
+    member_me = await client.get("/members/me", headers=late_member_headers)
+    member_id = member_me.json()["data"]["id"]
+    assert member_me.json()["data"]["cohort"] == "400"
 
     resp = await client.post(
         f"/purses/{purse_id}/contributions", json={"member_id": member_id}, headers=headers

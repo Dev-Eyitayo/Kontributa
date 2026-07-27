@@ -84,19 +84,20 @@ async def test_platform_admin_can_edit_group_and_it_is_audit_logged(client, db_s
     assert entry.after_state["name"] == "Renamed Department"
 
 
-async def test_group_edit_cohort_change_is_not_retroactive(client, db_session):
+async def test_group_edit_cohort_change_cascades_to_members(client, db_session):
+    """A platform admin editing a group's cohort immediately moves every
+    active member onto it too -- same cascade the group admin's own
+    PATCH /groups/{id} does (see GroupAdminService.update_group)."""
     headers, _admin_user = await _admin_headers(db_session)
     org, group, member, _ = await _setup_group_with_member(
         client, db_session, email="cohort-rep@example.com", member_email="cohort-member@example.com"
     )
-    original_cohort = member.cohort
 
     resp = await client.patch(f"/admin/groups/{group.id}", json={"cohort": "2099"}, headers=headers)
     assert resp.status_code == 200
 
     await db_session.refresh(member)
-    assert member.cohort == original_cohort
-    assert member.cohort != "2099"
+    assert member.cohort == "2099"
 
 
 async def test_platform_admin_can_list_group_members(client, db_session):

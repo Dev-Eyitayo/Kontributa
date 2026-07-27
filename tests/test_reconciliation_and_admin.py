@@ -156,17 +156,23 @@ async def test_display_status_reads_pending_for_expired_invoice_on_open_purse(cl
     assert purse_as_member.json()["data"]["contribution_status"] == "expired"
     assert purse_as_member.json()["data"]["display_status"] == "pending"
 
+    # Two rows now (the member's, plus the group's own admin at purse
+    # creation) -- match by id rather than assuming list order.
     admin_contributions = await client.get(
         f"/purses/{ctx['purse_id']}/contributions", headers=ctx["admin_headers"]
     )
-    admin_item = admin_contributions.json()["data"]["items"][0]
+    admin_item = next(
+        i for i in admin_contributions.json()["data"]["items"] if i["id"] == ctx["contribution_id"]
+    )
     assert admin_item["status"] == "expired"
     assert admin_item["display_status"] == "pending"
 
     transparency = await client.get(
         f"/purses/{ctx['purse_id']}/member-contributions", headers=ctx["member_headers"]
     )
-    transparency_item = transparency.json()["data"]["items"][0]
+    transparency_item = next(
+        i for i in transparency.json()["data"]["items"] if i["owner_type"] == "member"
+    )
     assert transparency_item["status"] == "expired"
     assert transparency_item["display_status"] == "pending"
 
@@ -177,10 +183,12 @@ async def test_display_status_reads_pending_for_expired_invoice_on_open_purse(cl
 
     # The purse summary's pending_count is display_status-driven too -- an
     # expired invoice on a still-open purse counts as pending here, not in
-    # its own separate/absent bucket.
+    # its own separate/absent bucket. Two rows count as pending now: the
+    # member's (raw expired, masked while the purse is open) and the
+    # group's own admin (still genuinely, raw pending -- never invoiced).
     summary_open = await client.get(f"/purses/{ctx['purse_id']}/summary", headers=ctx["admin_headers"])
     summary_open_data = summary_open.json()["data"]
-    assert summary_open_data["pending_count"] == 1
+    assert summary_open_data["pending_count"] == 2
     assert summary_open_data["expired_count"] == 0
 
     # The real pending -> expired transition (fired by the reconciliation
@@ -205,7 +213,9 @@ async def test_display_status_reads_pending_for_expired_invoice_on_open_purse(cl
 
     summary_closed = await client.get(f"/purses/{ctx['purse_id']}/summary", headers=ctx["admin_headers"])
     summary_closed_data = summary_closed.json()["data"]
-    assert summary_closed_data["pending_count"] == 0
+    # The admin's own contribution was never invoiced -- it's still
+    # genuinely, raw pending regardless of the purse's own status.
+    assert summary_closed_data["pending_count"] == 1
     assert summary_closed_data["expired_count"] == 1
 
 

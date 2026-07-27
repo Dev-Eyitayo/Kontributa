@@ -4,7 +4,7 @@ from decimal import Decimal
 from typing import Literal, Optional
 from uuid import UUID, uuid4
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -96,7 +96,13 @@ class ContributionService:
         of the purse's own cohort."""
         stmt = select(Member).where(Member.group_id == purse.group_id)
         if purse.cohort is not None:
-            stmt = stmt.where(Member.cohort == purse.cohort)
+            # A member with no cohort of their own (legacy data from
+            # before GroupAdminService.update_group started cascading a
+            # cohort edit onto every active member -- see that method)
+            # is treated as belonging to whatever the group's current
+            # cohort is, rather than being silently excluded from every
+            # cohort-scoped purse forever.
+            stmt = stmt.where(or_(Member.cohort == purse.cohort, Member.cohort.is_(None)))
 
         members = (await self.db.execute(stmt)).scalars().all()
         admins = (
@@ -133,7 +139,9 @@ class ContributionService:
             Purse.status == PurseStatus.OPEN,
         )
         purses = (await self.db.execute(stmt)).scalars().all()
-        eligible = [p for p in purses if p.cohort is None or p.cohort == member.cohort]
+        # A member with no cohort of their own matches any cohort-scoped
+        # purse too -- mirrors generate_for_purse's own fallback.
+        eligible = [p for p in purses if p.cohort is None or p.cohort == member.cohort or member.cohort is None]
 
         existing_purse_ids: set[UUID] = set()
         if eligible:

@@ -179,10 +179,14 @@ async def test_list_members_shows_members_when_group_onboarded_with_a_cohort(cli
     assert members.json()["data"]["items"][0]["name"] == "New Member"
 
 
-async def test_update_group_sets_cohort_not_retroactive(client, db_session):
-    """Changing a group's cohort only affects members who join, and purses
-    created, after the change -- an already-joined member and an
-    already-created purse keep whatever cohort they had at the time."""
+async def test_update_group_sets_cohort_retroactive_for_members_not_purses(client, db_session):
+    """Changing a group's cohort immediately cascades onto every already-
+    joined active member too, so a group's cohort and its members' own
+    cohort field never silently drift apart (see
+    GroupAdminService.update_group). An already-created purse is a
+    separate, deliberate snapshot -- its own stored cohort stays whatever
+    it was at creation; only members and purses created after the change
+    inherit the new value going forward."""
     from tests.conftest import find_redis_token
 
     org, _existing_group = await create_org_and_group(db_session)
@@ -239,9 +243,10 @@ async def test_update_group_sets_cohort_not_retroactive(client, db_session):
     assert patch.status_code == 200
     assert patch.json()["data"]["cohort"] == "500L"
 
-    # The already-joined member and already-created purse are untouched.
+    # The already-joined member is immediately moved onto the new
+    # cohort; the already-created purse's own snapshot is untouched.
     early_me = await client.get("/members/me", headers=early_headers)
-    assert early_me.json()["data"]["cohort"] is None
+    assert early_me.json()["data"]["cohort"] == "500L"
 
     await db_session.refresh(early_purse_row)
     assert early_purse_row.cohort is None

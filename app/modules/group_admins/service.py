@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -198,10 +198,13 @@ class GroupAdminService:
 
     async def update_group(self, user_id: UUID, group_id: UUID, payload) -> Group:
         """Only an existing active admin of this exact group. Changing
-        cohort here is NOT retroactive -- already-joined members and
-        already-created purses keep whatever cohort they had at the time;
-        only members who join, and purses created, after this call inherit
-        the new value (see Group.cohort)."""
+        cohort here IS retroactive for membership: every active member of
+        this group is immediately moved onto the new cohort too (see the
+        bulk UPDATE below), so a group's cohort and its members' own
+        cohort field never drift apart the way they used to. Already-
+        created purses are a separate, deliberate snapshot -- their own
+        stored cohort is untouched by this, only new ones created after
+        this call inherit the new value (see Group.cohort)."""
         await self.get_admin_for_group(user_id, group_id)
         group = await self.db.get(Group, group_id)
         if group is None:
@@ -213,6 +216,9 @@ class GroupAdminService:
             group.short_code = payload.short_code
         if payload.cohort is not None:
             group.cohort = payload.cohort
+            await self.db.execute(
+                update(Member).where(Member.group_id == group_id, Member.removed_at.is_(None)).values(cohort=payload.cohort)
+            )
 
         try:
             await self.db.commit()

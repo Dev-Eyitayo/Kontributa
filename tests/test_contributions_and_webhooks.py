@@ -70,7 +70,13 @@ async def _setup_purse_with_member(client, db_session, amount="2500.00"):
     )
     purse_id = create.json()["data"]["id"]
 
-    result = await db_session.execute(select(Contribution).where(Contribution.purse_id == purse_id))
+    # member_id IS NOT NULL -- a purse now also gets one admin-owned row
+    # for the group's own admin at creation time (see
+    # ContributionService.generate_for_purse), so "the one contribution
+    # for this purse" is no longer unambiguous on its own.
+    result = await db_session.execute(
+        select(Contribution).where(Contribution.purse_id == purse_id, Contribution.member_id.is_not(None))
+    )
     contribution = result.scalar_one()
 
     return {

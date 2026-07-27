@@ -1,6 +1,30 @@
 import asyncio
+import json
+from datetime import datetime, timedelta, timezone
 
+from app.core.config import settings
 from tests.conftest import _state, find_redis_token
+
+
+async def _get_family_id() -> str:
+    """Reads the (sole, per test-isolation's flushall between tests)
+    refresh token's family_id straight out of redis -- family_id is
+    never returned by any API response, so this is the only way a test
+    can get at it to manipulate last_active_at directly."""
+    keys = await _state["redis"].keys("refresh:*")
+    assert keys, "no refresh token found in redis"
+    raw = await _state["redis"].get(keys[0])
+    return json.loads(raw)["family_id"]
+
+
+async def _set_last_active(family_id: str, when) -> None:
+    await _state["redis"].set(f"last_active:{family_id}", str(int(when.timestamp())))
+
+
+async def _get_last_active(family_id: str):
+    raw = await _state["redis"].get(f"last_active:{family_id}")
+    assert raw is not None, "no last_active_at recorded for this family"
+    return datetime.fromtimestamp(int(raw), tz=timezone.utc)
 
 
 async def _register(client, email="member1@example.com", role="member", password="password123"):
@@ -172,6 +196,8 @@ async def test_get_me_returns_current_user(client):
     assert data["last_name"] == "Lovelace"
     assert data["role"] == "member"
     assert data["is_platform_admin"] is False
+    assert data["has_admin_identity"] is False
+    assert data["has_member_identity"] is False
 
     unauth = await client.get("/auth/me")
     assert unauth.status_code == 401
@@ -305,3 +331,118 @@ async def test_logout_revokes_refresh_token_and_blacklists_access_token(client):
 
     refresh_after_logout = await client.post("/auth/refresh-token", json={"refresh_token": refresh_token})
     assert refresh_after_logout.status_code == 401
+
+
+async def test_refresh_token_ttl_is_driven_by_the_env_setting_not_hardcoded(client, monkeypatch):
+    # A distinct value from both the real default (7) and the old
+    # hardcoded one (30) -- if this shows up in redis, the TTL can only
+    # have come from reading the setting at issue-time, not a literal.
+    monkeypatch.setattr(settings, "REFRESH_TOKEN_EXPIRE_DAYS", 3)
+
+    await _register(client, email="ttl-check@example.com", password="password123")
+    verify_token = await find_redis_token("verify_email")
+    await client.post("/auth/verify-email", json={"email": "ttl-check@example.com", "token": verify_token})
+    login = await client.post("/auth/login", json={"email": "ttl-check@example.com", "password": "password123"})
+    refresh_token = login.json()["data"]["refresh_token"]
+
+    ttl_seconds = await _state["redis"].ttl(f"refresh:{refresh_token}")
+    expected_seconds = 3 * 24 * 60 * 60
+    # A few seconds of slack for however long the request itself took.
+    assert expected_seconds - 5 <= ttl_seconds <= expected_seconds
+
+
+async def test_heartbeat_updates_last_active_at_for_the_current_session(client):
+    await _register(client, email="heartbeat@example.com", password="password123")
+    verify_token = await find_redis_token("verify_email")
+    await client.post("/auth/verify-email", json={"email": "heartbeat@example.com", "token": verify_token})
+    login = await client.post("/auth/login", json={"email": "heartbeat@example.com", "password": "password123"})
+    access_token = login.json()["data"]["access_token"]
+
+    family_id = await _get_family_id()
+    # Login itself seeds a baseline -- push it artificially into the past
+    # so a genuine heartbeat call is the only thing that could move it
+    # back to "now".
+    await _set_last_active(family_id, datetime.now(timezone.utc) - timedelta(minutes=10))
+
+    resp = await client.post("/auth/heartbeat", headers={"Authorization": f"Bearer {access_token}"})
+    assert resp.status_code == 200
+    assert resp.json()["data"]["ok"] is True
+
+    last_active = await _get_last_active(family_id)
+    assert datetime.now(timezone.utc) - last_active < timedelta(seconds=10)
+
+
+async def test_refresh_is_rejected_after_the_inactivity_gap_exceeds_the_threshold(client):
+    """The core inactivity-logout backstop: even a refresh token that is
+    nowhere near its own absolute TTL must be rejected once too long has
+    passed since the last *genuine* activity -- and the session must be
+    fully revoked, not just this one request refused."""
+    await _register(client, email="idle-out@example.com", password="password123")
+    verify_token = await find_redis_token("verify_email")
+    await client.post("/auth/verify-email", json={"email": "idle-out@example.com", "token": verify_token})
+    login = await client.post("/auth/login", json={"email": "idle-out@example.com", "password": "password123"})
+    refresh_token = login.json()["data"]["refresh_token"]
+
+    family_id = await _get_family_id()
+    # Well past INACTIVITY_TIMEOUT_MINUTES (30 by default), nowhere near
+    # REFRESH_TOKEN_EXPIRE_DAYS -- this must fail specifically because of
+    # the inactivity gap, not the token's own age.
+    await _set_last_active(family_id, datetime.now(timezone.utc) - timedelta(minutes=45))
+
+    resp = await client.post("/auth/refresh-token", json={"refresh_token": refresh_token})
+    assert resp.status_code == 401
+    assert resp.json()["error"]["code"] == "session_inactive"
+
+    # The whole family must be gone -- a forced full re-login, not a
+    # recoverable retry.
+    assert await _state["redis"].get(f"refresh:{refresh_token}") is None
+
+
+async def test_refresh_survives_light_but_real_activity_spaced_past_access_token_lifetime(client):
+    """A person actively (if lightly) using the app must never be logged
+    out by this mechanism -- simulated here by a last heartbeat 20
+    minutes ago: well past the access token's own 15-minute lifetime
+    (so a refresh is genuinely necessary), but comfortably inside the
+    30-minute inactivity threshold."""
+    await _register(client, email="still-active@example.com", password="password123")
+    verify_token = await find_redis_token("verify_email")
+    await client.post("/auth/verify-email", json={"email": "still-active@example.com", "token": verify_token})
+    login = await client.post(
+        "/auth/login", json={"email": "still-active@example.com", "password": "password123"}
+    )
+    refresh_token = login.json()["data"]["refresh_token"]
+
+    family_id = await _get_family_id()
+    await _set_last_active(family_id, datetime.now(timezone.utc) - timedelta(minutes=20))
+
+    resp = await client.post("/auth/refresh-token", json={"refresh_token": refresh_token})
+    assert resp.status_code == 200
+    assert resp.json()["data"]["refresh_token"] != refresh_token
+
+
+async def test_refresh_itself_never_counts_as_activity(client):
+    """Regression test for the exact failure mode this whole mechanism
+    exists to prevent: the silent access-token refresh fires on its own
+    schedule regardless of whether a human is present, so it must never
+    reset last_active_at -- otherwise an abandoned-but-open tab with any
+    ambient background traffic would keep refreshing its own inactivity
+    window forever and never actually time out."""
+    await _register(client, email="no-self-credit@example.com", password="password123")
+    verify_token = await find_redis_token("verify_email")
+    await client.post("/auth/verify-email", json={"email": "no-self-credit@example.com", "token": verify_token})
+    login = await client.post(
+        "/auth/login", json={"email": "no-self-credit@example.com", "password": "password123"}
+    )
+    refresh_token = login.json()["data"]["refresh_token"]
+
+    family_id = await _get_family_id()
+    stale_but_valid = datetime.now(timezone.utc) - timedelta(minutes=20)
+    await _set_last_active(family_id, stale_but_valid)
+
+    resp = await client.post("/auth/refresh-token", json={"refresh_token": refresh_token})
+    assert resp.status_code == 200
+
+    last_active_after_refresh = await _get_last_active(family_id)
+    # Compared as whole seconds -- the round trip through redis (stored
+    # as an int() timestamp) drops sub-second precision.
+    assert int(last_active_after_refresh.timestamp()) == int(stale_but_valid.timestamp())

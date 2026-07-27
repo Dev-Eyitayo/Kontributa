@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.auth import CurrentUser, get_current_group_admin_user
+from app.core.auth import CurrentUser, get_current_group_admin_user, get_current_user
 from app.core.db import get_db
 from app.core.pagination import DEFAULT_LIMIT, MAX_LIMIT, Paginated
 from app.core.response import StandardResponse, success_response
@@ -36,11 +36,15 @@ def get_group_admin_service(db: AsyncSession = Depends(get_db)) -> GroupAdminSer
 @router.post("/onboard", status_code=201, response_model=StandardResponse[OnboardGroupAdminResponse])
 async def onboard(
     payload: OnboardGroupAdminRequest,
-    current_user: CurrentUser = Depends(get_current_group_admin_user),
+    current_user: CurrentUser = Depends(get_current_user),
     service: GroupAdminService = Depends(get_group_admin_service),
 ) -> JSONResponse:
     # Callable any time, not just at first login -- an existing admin
     # creating a second (third, ...) group goes through this same path.
+    # Deliberately NOT gated on get_current_group_admin_user: this is the
+    # acquisition path for the GroupAdmin identity itself, so an existing
+    # Member account with no GroupAdmin row yet must be able to reach it
+    # too (see "Create your own group" in the Member group switcher).
     admin, group = await service.onboard(current_user.id, payload)
     return success_response(
         {
@@ -57,7 +61,11 @@ async def onboard(
 
 @router.get("/me/groups", response_model=StandardResponse[list[MyGroupListItem]])
 async def list_my_groups(
-    current_user: CurrentUser = Depends(get_current_group_admin_user),
+    # Deliberately NOT get_current_group_admin_user: this is exactly how
+    # GroupProvider (the frontend) decides whether to redirect a
+    # not-yet-onboarded group_admin-role account to /onboarding, so it
+    # must succeed with an empty list rather than 403 for zero identity.
+    current_user: CurrentUser = Depends(get_current_user),
     service: GroupAdminService = Depends(get_group_admin_service),
 ) -> JSONResponse:
     groups = await service.list_my_groups(current_user.id)

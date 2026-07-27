@@ -80,7 +80,11 @@ async def join_additional_group(
 
 @router.get("/me/groups", response_model=StandardResponse[list[MyMemberGroupItem]])
 async def list_my_groups(
-    current_user: CurrentUser = Depends(get_current_member_user),
+    # Deliberately NOT get_current_member_user -- mirrors group_admins
+    # router's own list_my_groups: succeeds with an empty list for zero
+    # identity rather than 403, for a member-role account with no Member
+    # row yet.
+    current_user: CurrentUser = Depends(get_current_user),
     service: MemberService = Depends(get_member_service),
 ) -> JSONResponse:
     groups = await service.list_my_groups(current_user.id)

@@ -28,6 +28,11 @@ class MeResponse(BaseModel):
     last_name: str
     role: str
     is_platform_admin: bool
+    # Derived from live GroupAdmin/Member rows, not from role above -- see
+    # AuthService.get_me. The frontend's mode switcher (Admin vs Member
+    # experience) is driven by these two flags.
+    has_admin_identity: bool
+    has_member_identity: bool
 
 
 class VerifyEmailRequest(BaseModel):
@@ -79,6 +84,10 @@ class LogoutRequest(BaseModel):
 
 class LogoutResponse(BaseModel):
     logged_out: bool = True
+
+
+class HeartbeatResponse(BaseModel):
+    ok: bool = True
 
 
 class ForgotPasswordRequest(BaseModel):

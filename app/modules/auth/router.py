@@ -6,12 +6,14 @@ from app.core.auth import (
     AccessTokenBlacklist,
     CurrentUser,
     RefreshTokenService,
+    SessionActivityService,
     SingleUseTokenStore,
     get_access_token_blacklist,
     get_current_user,
     get_email_verification_token_store,
     get_password_reset_token_store,
     get_refresh_token_service,
+    get_session_activity_service,
 )
 from app.core.auth_cookies import REFRESH_TOKEN_COOKIE, clear_auth_cookies, set_auth_cookies, set_csrf_cookie
 from app.core.config import settings
@@ -22,6 +24,7 @@ from app.core.response import StandardResponse, success_response
 from app.modules.auth.schemas import (
     ForgotPasswordRequest,
     ForgotPasswordResponse,
+    HeartbeatResponse,
     LoginRequest,
     LoginResponse,
     LogoutRequest,
@@ -51,6 +54,7 @@ def get_auth_service(
     verify_email_tokens: SingleUseTokenStore = Depends(get_email_verification_token_store),
     reset_password_tokens: SingleUseTokenStore = Depends(get_password_reset_token_store),
     sendbyte: SendByteClient = Depends(get_sendbyte_client),
+    activity: SessionActivityService = Depends(get_session_activity_service),
 ) -> AuthService:
     return AuthService(
         db,
@@ -59,6 +63,7 @@ def get_auth_service(
         verify_email_tokens,
         reset_password_tokens,
         NotificationService(db, sendbyte),
+        activity,
     )
 
 
@@ -116,7 +121,7 @@ async def get_me(
     current_user: CurrentUser = Depends(get_current_user),
     service: AuthService = Depends(get_auth_service),
 ) -> JSONResponse:
-    user = await service.get_me(current_user.id)
+    user, has_admin_identity, has_member_identity = await service.get_me(current_user.id)
     return success_response(
         {
             "id": str(user.id),
@@ -125,6 +130,8 @@ async def get_me(
             "last_name": user.last_name,
             "role": user.role.value,
             "is_platform_admin": user.is_platform_admin,
+            "has_admin_identity": has_admin_identity,
+            "has_member_identity": has_member_identity,
         }
     )
 
@@ -187,6 +194,21 @@ async def logout(
         return response
 
     return success_response({"logged_out": True})
+
+
+@router.post("/heartbeat", response_model=StandardResponse[HeartbeatResponse])
+async def heartbeat(
+    current_user: CurrentUser = Depends(get_current_user),
+    service: AuthService = Depends(get_auth_service),
+) -> JSONResponse:
+    # A deliberate signal of genuine human interaction -- the frontend
+    # calls this only from real mouse/keyboard/touch/scroll listeners,
+    # debounced to at most once a minute (see use-idle-session.ts). Never
+    # inferred from ordinary API traffic, including the silent access-
+    # token refresh itself, which fires on its own schedule regardless of
+    # whether anyone is actually present.
+    await service.heartbeat(current_user.family_id)
+    return success_response({"ok": True})
 
 
 @router.post(

@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.auth import (
     AccessTokenBlacklist,
     RefreshTokenService,
+    SessionActivityService,
     SingleUseTokenStore,
     create_access_token,
 )
@@ -14,6 +15,8 @@ from app.core.config import settings
 from app.core.exceptions import AuthError, ConflictError, ForbiddenError, NotFoundError
 from app.core.security import hash_password, verify_password
 from app.modules.auth.models import User
+from app.modules.group_admins.models import GroupAdmin
+from app.modules.members.models import Member
 from app.modules.auth.schemas import (
     LoginRequest,
     RefreshTokenRequest,
@@ -32,6 +35,7 @@ class AuthService:
         verify_email_tokens: SingleUseTokenStore,
         reset_password_tokens: SingleUseTokenStore,
         notifications: NotificationService,
+        activity: SessionActivityService,
     ):
         self.db = db
         self.refresh_tokens = refresh_tokens
@@ -39,16 +43,35 @@ class AuthService:
         self.verify_email_tokens = verify_email_tokens
         self.reset_password_tokens = reset_password_tokens
         self.notifications = notifications
+        self.activity = activity
 
     async def _get_by_email(self, email: str) -> User | None:
         result = await self.db.execute(select(User).where(User.email == email))
         return result.scalar_one_or_none()
 
-    async def get_me(self, user_id: UUID) -> User:
+    async def get_me(self, user_id: UUID) -> tuple[User, bool, bool]:
         user = await self.db.get(User, user_id)
         if user is None:
             raise NotFoundError("user not found")
-        return user
+
+        # Derived, not read off User.role -- an account can hold an active
+        # GroupAdmin row for some groups and an active Member row for
+        # others at the same time now, and User.role only ever reflects
+        # whichever one existed at registration. The frontend's mode
+        # switcher (Admin vs Member experience) is driven entirely by
+        # these two flags, not by role.
+        has_admin_identity = (
+            await self.db.execute(
+                select(GroupAdmin.id).where(GroupAdmin.user_id == user_id, GroupAdmin.is_active_admin.is_(True)).limit(1)
+            )
+        ).scalar_one_or_none() is not None
+        has_member_identity = (
+            await self.db.execute(
+                select(Member.id).where(Member.user_id == user_id, Member.removed_at.is_(None)).limit(1)
+            )
+        ).scalar_one_or_none() is not None
+
+        return user, has_admin_identity, has_member_identity
 
     async def register(self, payload: RegisterRequest) -> User:
         existing = await self._get_by_email(payload.email)
@@ -149,22 +172,48 @@ class AuthService:
                 "verify your email before logging in", code="email_not_verified"
             )
 
-        access = create_access_token(user.id, user.role.value)
-        refresh_token, _ = await self.refresh_tokens.issue(user.id)
+        refresh_token, family_id = await self.refresh_tokens.issue(user.id)
+        # Logging in is itself unambiguous real human activity -- seeds the
+        # very first last_active_at so the inactivity check (see refresh()
+        # below) has a real baseline from the start of the session, not
+        # just from whenever the first heartbeat happens to land.
+        await self.activity.touch(family_id)
+        access = create_access_token(user.id, user.role.value, family_id)
         return access.token, refresh_token, user.role.value
 
     async def refresh(self, payload: RefreshTokenRequest) -> tuple[str, str]:
-        new_refresh_token, user_id = await self.refresh_tokens.rotate(payload.refresh_token)
+        peeked = await self.refresh_tokens.peek(payload.refresh_token)
+        if peeked is None:
+            raise AuthError("invalid or expired refresh token", code="refresh_invalid")
+        _peeked_user_id, family_id = peeked
+
+        # Deliberately separate from the token's own TTL: a token can be
+        # well within its REFRESH_TOKEN_EXPIRE_DAYS life and still get
+        # rejected here specifically because no genuine activity (see
+        # SessionActivityService) has been recorded recently enough.
+        if await self.activity.is_stale(family_id, settings.INACTIVITY_TIMEOUT_MINUTES):
+            await self.refresh_tokens.revoke_family(family_id)
+            await self.activity.clear(family_id)
+            raise AuthError("session expired due to inactivity", code="session_inactive")
+
+        new_refresh_token, user_id, family_id = await self.refresh_tokens.rotate(payload.refresh_token)
 
         user = await self.db.get(User, user_id)
         if user is None:
             raise NotFoundError("user not found")
 
-        access = create_access_token(user.id, user.role.value)
+        access = create_access_token(user.id, user.role.value, family_id)
         return access.token, new_refresh_token
 
+    async def heartbeat(self, family_id: str | None) -> None:
+        if family_id:
+            await self.activity.touch(family_id)
+
     async def logout(self, refresh_token: str, access_jti: str, access_exp) -> None:
+        peeked = await self.refresh_tokens.peek(refresh_token)
         await self.refresh_tokens.revoke_by_token(refresh_token)
+        if peeked is not None:
+            await self.activity.clear(peeked[1])
         await self.blacklist.blacklist(access_jti, access_exp)
 
     async def forgot_password(self, email: str) -> None:

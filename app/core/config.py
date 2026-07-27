@@ -51,7 +51,12 @@ class Settings(BaseSettings):
     JWT_SECRET_KEY: str = "change-me-in-production"
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
-    REFRESH_TOKEN_EXPIRE_DAYS: int = 30
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+    # A separate mechanism from the token's own absolute TTL above -- see
+    # SessionActivityService. A refresh call is rejected once the gap
+    # since the last genuine heartbeat exceeds this, even if the token
+    # itself is still well within its REFRESH_TOKEN_EXPIRE_DAYS life.
+    INACTIVITY_TIMEOUT_MINUTES: int = 30
 
 
     USE_HTTPONLY_COOKIES: bool = False

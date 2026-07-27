@@ -30,6 +30,7 @@ from app.modules.auth.schemas import (
     LogoutRequest,
     LogoutResponse,
     MeResponse,
+    MyIdentityGroupItem,
     RefreshTokenRequest,
     RefreshTokenResponse,
     RegisterRequest,
@@ -133,6 +134,28 @@ async def get_me(
             "has_admin_identity": has_admin_identity,
             "has_member_identity": has_member_identity,
         }
+    )
+
+
+@router.get("/me/groups", response_model=StandardResponse[list[MyIdentityGroupItem]])
+async def get_my_groups(
+    current_user: CurrentUser = Depends(get_current_user),
+    service: AuthService = Depends(get_auth_service),
+) -> JSONResponse:
+    """Every group this account is associated with, admin or member,
+    combined into one list -- backs the frontend's unified group switcher
+    (see current-groups.ts / UnifiedSwitcher.tsx)."""
+    groups = await service.list_my_groups(current_user.id)
+    return success_response(
+        [
+            {
+                "group_id": str(g["group_id"]),
+                "group_name": g["group_name"],
+                "short_code": g["short_code"],
+                "role": g["role"],
+            }
+            for g in groups
+        ]
     )
 
 

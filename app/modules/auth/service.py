@@ -17,6 +17,7 @@ from app.core.security import hash_password, verify_password
 from app.modules.auth.models import User
 from app.modules.group_admins.models import GroupAdmin
 from app.modules.members.models import Member
+from app.modules.organizations.models import Group
 from app.modules.auth.schemas import (
     LoginRequest,
     RefreshTokenRequest,
@@ -57,9 +58,9 @@ class AuthService:
         # Derived, not read off User.role -- an account can hold an active
         # GroupAdmin row for some groups and an active Member row for
         # others at the same time now, and User.role only ever reflects
-        # whichever one existed at registration. The frontend's mode
-        # switcher (Admin vs Member experience) is driven entirely by
-        # these two flags, not by role.
+        # whichever one existed at registration. The frontend's unified
+        # group switcher (see list_my_groups below) is driven entirely by
+        # these live rows, not by role.
         has_admin_identity = (
             await self.db.execute(
                 select(GroupAdmin.id).where(GroupAdmin.user_id == user_id, GroupAdmin.is_active_admin.is_(True)).limit(1)
@@ -72,6 +73,30 @@ class AuthService:
         ).scalar_one_or_none() is not None
 
         return user, has_admin_identity, has_member_identity
+
+    async def list_my_groups(self, user_id: UUID) -> list[dict]:
+        """Every group this account is associated with, admin or member,
+        combined into a single list -- the frontend's unified switcher
+        (one list, one selection, one thing to keep in sync) replaces what
+        used to be two separate role-scoped lists plus a standalone mode
+        switcher."""
+        admin_rows = await self.db.execute(
+            select(Group)
+            .join(GroupAdmin, GroupAdmin.group_id == Group.id)
+            .where(GroupAdmin.user_id == user_id, GroupAdmin.is_active_admin.is_(True))
+        )
+        member_rows = await self.db.execute(
+            select(Group)
+            .join(Member, Member.group_id == Group.id)
+            .where(Member.user_id == user_id, Member.removed_at.is_(None))
+        )
+        return [
+            {"group_id": group.id, "group_name": group.name, "short_code": group.short_code, "role": "admin"}
+            for group in admin_rows.scalars().all()
+        ] + [
+            {"group_id": group.id, "group_name": group.name, "short_code": group.short_code, "role": "member"}
+            for group in member_rows.scalars().all()
+        ]
 
     async def register(self, payload: RegisterRequest) -> User:
         existing = await self._get_by_email(payload.email)

@@ -29,10 +29,20 @@ class MeResponse(BaseModel):
     role: str
     is_platform_admin: bool
     # Derived from live GroupAdmin/Member rows, not from role above -- see
-    # AuthService.get_me. The frontend's mode switcher (Admin vs Member
-    # experience) is driven by these two flags.
+    # AuthService.get_me.
     has_admin_identity: bool
     has_member_identity: bool
+
+
+class MyIdentityGroupItem(BaseModel):
+    """One row of the unified group switcher -- every group this account
+    is associated with, admin or member, tagged with which. See
+    AuthService.list_my_groups."""
+
+    group_id: UUID
+    group_name: str
+    short_code: str
+    role: Literal["admin", "member"]
 
 
 class VerifyEmailRequest(BaseModel):

@@ -131,6 +131,39 @@ async def test_auth_me_reports_dual_identity_flags(client, db_session):
     assert after.json()["data"]["has_member_identity"] is True
 
 
+async def test_auth_me_groups_combines_admin_and_member_rows_with_role_tags(client, db_session):
+    org, _existing_group = await create_org_and_group(db_session)
+    admin_headers = await _register_verify_login(client, "combined-admin@example.com", "group_admin")
+    owned_group = await onboard_group_admin(client, db_session, org, admin_headers, group_name="Owned Group")
+
+    only_admin = await client.get("/auth/me/groups", headers=admin_headers)
+    assert only_admin.status_code == 200
+    assert only_admin.json()["data"] == [
+        {"group_id": str(owned_group.id), "group_name": "Owned Group", "short_code": owned_group.short_code, "role": "admin"}
+    ]
+
+    other_admin_headers = await _register_verify_login(client, "combined-other-admin@example.com", "group_admin")
+    joined_group = await onboard_group_admin(
+        client, db_session, org, other_admin_headers, group_name="Joined Group"
+    )
+    invite = await client.post(
+        f"/group-admins/invite-links?group_id={joined_group.id}",
+        json={"expires_in_days": 7},
+        headers=other_admin_headers,
+    )
+    token = invite.json()["data"]["token"]
+    join = await client.post(f"/members/join-additional/{token}", json={}, headers=admin_headers)
+    assert join.status_code == 201, join.text
+
+    combined = await client.get("/auth/me/groups", headers=admin_headers)
+    assert combined.status_code == 200
+    entries = combined.json()["data"]
+    assert len(entries) == 2
+    roles_by_group = {e["group_id"]: e["role"] for e in entries}
+    assert roles_by_group[str(owned_group.id)] == "admin"
+    assert roles_by_group[str(joined_group.id)] == "member"
+
+
 async def test_group_admin_role_before_onboarding_still_gets_empty_groups_list(client):
     """Regression guard: get_current_group_admin_user became identity-
     based (an active GroupAdmin row), not role-based -- a freshly

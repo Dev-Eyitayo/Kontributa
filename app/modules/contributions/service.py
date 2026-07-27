@@ -693,18 +693,18 @@ class ContributionService:
 
         if notifications is not None and contribution.status == ContributionStatus.PAID:
             purse = await self.db.get(Purse, contribution.purse_id)
-            if purse is not None:
-                await self._notify_owner(
-                    contribution,
-                    notifications,
-                    "payment_receipt.html",
-                    f"Payment received -- {purse.title}",
-                    {
-                        "purse_title": purse.title,
-                        "amount": str(contribution.amount_received),
-                        "paid_at": format_datetime(contribution.paid_at) if contribution.paid_at else "",
-                    },
-                )
+            # if purse is not None:
+            #     await self._notify_owner(
+            #         contribution,
+            #         notifications,
+            #         "payment_receipt.html",
+            #         f"Payment received - {purse.title}",
+            #         {
+            #             "purse_title": purse.title,
+            #             "amount": str(contribution.amount_received),
+            #             "paid_at": format_datetime(contribution.paid_at) if contribution.paid_at else "",
+            #         },
+            #     )
 
         return contribution
 

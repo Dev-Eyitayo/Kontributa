@@ -197,6 +197,14 @@ class GroupAdminService:
         )
         total_collected_across_open_purses = collected_result.scalar_one()
 
+        from app.modules.settlement.models import SettlementAccount
+
+        settlement_account = (
+            await self.db.execute(select(SettlementAccount).where(SettlementAccount.group_id == admin.group_id))
+        ).scalar_one_or_none()
+        has_settlement_account = settlement_account is not None
+        settlement_mode = settlement_account.settlement_mode.value if settlement_account else None
+
         return (
             admin,
             user,
@@ -205,6 +213,8 @@ class GroupAdminService:
             purses_count,
             new_members_this_month,
             total_collected_across_open_purses,
+            has_settlement_account,
+            settlement_mode,
         )
 
     async def update_me(self, user_id: UUID, group_id: UUID, payload) -> tuple[GroupAdmin, User]:

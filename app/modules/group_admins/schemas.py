@@ -59,6 +59,8 @@ class GroupAdminMeResponse(BaseModel):
     # Collected" stat. Money is always a string on the wire -- see
     # known-limitations.md.
     total_collected_across_open_purses: str
+    has_settlement_account: bool
+    settlement_mode: Optional[str] = None
 
 
 class GroupAdminUpdateRequest(BaseModel):

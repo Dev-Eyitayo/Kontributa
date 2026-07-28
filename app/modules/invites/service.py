@@ -27,7 +27,8 @@ class InviteService:
 
     def _is_exhausted(self, invite: InviteLink) -> bool:
         now = datetime.now(timezone.utc)
-        expired = invite.expires_at < now or invite.revoked_at is not None
+        expires_at = invite.expires_at.replace(tzinfo=timezone.utc) if invite.expires_at.tzinfo is None else invite.expires_at
+        expired = expires_at < now or invite.revoked_at is not None
         maxed_out = invite.max_uses is not None and invite.used_count >= invite.max_uses
         return expired or maxed_out
 
@@ -114,7 +115,8 @@ class InviteService:
     @staticmethod
     def is_active(invite: InviteLink) -> bool:
         now = datetime.now(timezone.utc)
-        if invite.revoked_at is not None or invite.expires_at < now:
+        expires_at = invite.expires_at.replace(tzinfo=timezone.utc) if invite.expires_at.tzinfo is None else invite.expires_at
+        if invite.revoked_at is not None or expires_at < now:
             return False
         if invite.max_uses is not None and invite.used_count >= invite.max_uses:
             return False

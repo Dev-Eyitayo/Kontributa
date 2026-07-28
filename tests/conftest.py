@@ -1,10 +1,25 @@
 import asyncio
+import os
+import pathlib
 
+import pytest
 import fakeredis.aioredis
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import pool, text
+from sqlalchemy import JSON, pool, text
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.ext.compiler import compiles
+
+
+@compiles(JSONB, "sqlite")
+def _compile_jsonb_sqlite(type_, compiler, **kw):
+    return compiler.visit_JSON(JSON(), **kw)
+
+
+@compiles(UUID, "sqlite")
+def _compile_uuid_sqlite(type_, compiler, **kw):
+    return "CHAR(36)"
 
 from app.core.config import settings
 from app.core.db import Base, get_db
@@ -40,56 +55,85 @@ from app.modules.settlement import models as _settlement_models  # noqa: F401
 from app.modules.webhooks import models as _webhook_models  # noqa: F401
 
 
+import os
+import pathlib
+
+TEST_DB_FILE = os.getenv("TEST_DB_FILE", "/tmp/kontributa_test.db")
+USE_POSTGRES = os.getenv("USE_POSTGRES", "0").lower() in ("1", "true", "yes")
+
+if USE_POSTGRES:
+    TEST_URL = settings.TEST_DATABASE_URL
+    TEST_RUNTIME_URL = settings.TEST_RUNTIME_DATABASE_URL
+else:
+    TEST_URL = f"sqlite+aiosqlite:///{TEST_DB_FILE}"
+    TEST_RUNTIME_URL = TEST_URL
+
+
 def _prepare_schema_once() -> None:
     async def _run():
-        # Tests build the schema directly from Base.metadata rather than
-        # running Alembic migrations, so the role creation + GRANT/REVOKE
-        # setup from migration 83d4db43c592 has to be mirrored here too --
-        # otherwise the REVOKE-permissions test would be exercising a role
-        # that was never actually restricted.
-        engine = create_async_engine(settings.TEST_DATABASE_URL, poolclass=pool.NullPool)
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.drop_all)
-            await conn.run_sync(Base.metadata.create_all)
+        if not USE_POSTGRES:
+            if os.path.exists(TEST_DB_FILE):
+                try:
+                    os.remove(TEST_DB_FILE)
+                except OSError:
+                    pass
+            engine = create_async_engine(TEST_URL, poolclass=pool.NullPool)
+            async with engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+                await conn.execute(text("INSERT INTO audit_chain_head (id, last_row_hash) VALUES (1, NULL)"))
+            await engine.dispose()
+        else:
+            engine = create_async_engine(TEST_URL, poolclass=pool.NullPool)
+            async with engine.begin() as conn:
+                await conn.run_sync(Base.metadata.drop_all)
+                await conn.run_sync(Base.metadata.create_all)
 
-            role = settings.APP_DB_ROLE
-            password = settings.APP_DB_PASSWORD
-            db_name = engine.url.database
-            superuser = engine.url.username
+                role = settings.APP_DB_ROLE
+                password = settings.APP_DB_PASSWORD
+                db_name = engine.url.database
+                superuser = engine.url.username
 
-            await conn.execute(
-                text(
-                    f"""
-                    DO $$
-                    BEGIN
-                        IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '{role}') THEN
-                            CREATE ROLE {role} LOGIN PASSWORD '{password}';
-                        END IF;
-                    END
-                    $$;
-                    """
+                await conn.execute(
+                    text(
+                        f"""
+                        DO $$
+                        BEGIN
+                            IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '{role}') THEN
+                                CREATE ROLE {role} LOGIN PASSWORD '{password}';
+                            END IF;
+                        END
+                        $$;
+                        """
+                    )
                 )
-            )
-            await conn.execute(text(f"GRANT CONNECT ON DATABASE {db_name} TO {role}"))
-            await conn.execute(text(f"GRANT USAGE ON SCHEMA public TO {role}"))
-            await conn.execute(text(f"GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO {role}"))
-            await conn.execute(text(f"GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO {role}"))
-            await conn.execute(
-                text(
-                    f"ALTER DEFAULT PRIVILEGES FOR ROLE {superuser} IN SCHEMA public "
-                    f"GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO {role}"
+                await conn.execute(text(f"GRANT CONNECT ON DATABASE {db_name} TO {role}"))
+                await conn.execute(text(f"GRANT USAGE ON SCHEMA public TO {role}"))
+                await conn.execute(text(f"GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO {role}"))
+                await conn.execute(text(f"GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO {role}"))
+                await conn.execute(
+                    text(
+                        f"ALTER DEFAULT PRIVILEGES FOR ROLE {superuser} IN SCHEMA public "
+                        f"GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO {role}"
+                    )
                 )
-            )
-            for audit_table in ("audit_log", "contribution_events", "payout_events"):
-                await conn.execute(text(f"REVOKE UPDATE, DELETE ON {audit_table} FROM {role}"))
+                for audit_table in ("audit_log", "contribution_events", "payout_events"):
+                    await conn.execute(text(f"REVOKE UPDATE, DELETE ON {audit_table} FROM {role}"))
 
-            await conn.execute(text("INSERT INTO audit_chain_head (id, last_row_hash) VALUES (1, NULL)"))
-        await engine.dispose()
+                await conn.execute(text("INSERT INTO audit_chain_head (id, last_row_hash) VALUES (1, NULL)"))
+            await engine.dispose()
 
     asyncio.run(_run())
 
 
 _prepare_schema_once()
+
+
+def pytest_sessionfinish(session, exitstatus):
+    if not USE_POSTGRES and os.path.exists(TEST_DB_FILE):
+        try:
+            os.remove(TEST_DB_FILE)
+        except OSError:
+            pass
 
 _state: dict = {}
 
@@ -221,9 +265,9 @@ async def db_setup():
     # the schema-bootstrap-time superuser connection. Teardown's wipe-all
     # step needs the superuser instead, since it deletes from those same
     # audit tables between tests, which the restricted role can't do.
-    engine = create_async_engine(settings.TEST_RUNTIME_DATABASE_URL, poolclass=pool.NullPool)
+    engine = create_async_engine(TEST_RUNTIME_URL, poolclass=pool.NullPool)
     session_local = async_sessionmaker(bind=engine, expire_on_commit=False, autoflush=False)
-    admin_engine = create_async_engine(settings.TEST_DATABASE_URL, poolclass=pool.NullPool)
+    admin_engine = create_async_engine(TEST_URL, poolclass=pool.NullPool)
     fake_redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
 
     fake_monnify = FakeMonnifyClient()

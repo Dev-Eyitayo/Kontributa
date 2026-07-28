@@ -98,6 +98,8 @@ async def get_me(
         purses_count,
         new_members_this_month,
         total_collected_across_open_purses,
+        has_settlement_account,
+        settlement_mode,
     ) = await service.get_me(current_user.id, group_id)
     return success_response(
         {
@@ -111,6 +113,8 @@ async def get_me(
             "members_count": members_count,
             "new_members_this_month": new_members_this_month,
             "total_collected_across_open_purses": str(total_collected_across_open_purses),
+            "has_settlement_account": has_settlement_account,
+            "settlement_mode": settlement_mode,
         }
     )
 

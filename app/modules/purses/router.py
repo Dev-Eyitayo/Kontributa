@@ -61,6 +61,8 @@ LAGGING_PERCENT_THRESHOLD = 90.0
 def _pacing_status(status: str, deadline: datetime, paid_count: int, total_count: int, now: datetime) -> Optional[str]:
     if status != "open":
         return None
+    if deadline.tzinfo is None:
+        deadline = deadline.replace(tzinfo=timezone.utc)
     if deadline < now:
         return "pending_close"
     percent_complete = (paid_count / total_count * 100) if total_count else 0.0

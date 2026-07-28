@@ -3,9 +3,10 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select, update
 
+from app.modules.contributions.models import Contribution, ContributionStatus
 from app.modules.members.models import Member
 from tests.conftest import create_org_and_group, find_redis_token, onboard_group_admin
-from tests.test_purses import _invite_and_join_member
+from tests.test_purses import _invite_and_join_member, _purse_payload
 
 
 async def _register_and_login_group_admin(client, email="rep1@example.com"):
@@ -86,6 +87,65 @@ async def test_me_new_members_this_month_is_a_real_count_not_a_capped_list_filte
     assert me.status_code == 200
     assert me.json()["data"]["members_count"] == 2
     assert me.json()["data"]["new_members_this_month"] == 1
+
+
+async def test_me_total_collected_across_open_purses(client, db_session):
+    """GET /group-admins/me returns a real server-computed aggregate
+    across every open purse's paid contributions -- not a client-side sum
+    of the (capped, paginated) purses list the Group Admin Dashboard used
+    to rely on, which crashed on any purse missing the summed field. A
+    brand-new group with zero purses must not crash (it reports "0.00"),
+    and a closed purse's collected amount must not be counted."""
+    org, _existing_group = await create_org_and_group(db_session)
+    headers = await _register_and_login_group_admin(client)
+    onboard = await client.post(
+        "/group-admins/onboard",
+        json={"organization_id": str(org.id), "new_group_name": "Collections Group"},
+        headers=headers,
+    )
+    group_id = onboard.json()["data"]["group_id"]
+
+    # Brand-new group, zero purses -- the exact repro (create a new group,
+    # switch to it) that used to crash the dashboard.
+    me = await client.get(f"/group-admins/me?group_id={group_id}", headers=headers)
+    assert me.status_code == 200
+    # Unpadded "0", not "0.00" -- same convention as collected_totals_for_purses'
+    # own zero default; formatMoney on the frontend handles either fine.
+    assert me.json()["data"]["total_collected_across_open_purses"] == "0"
+
+    await _invite_and_join_member(client, headers, group_id, email="payer@example.com")
+
+    open_purse = await client.post(
+        "/purses", json=_purse_payload(group_id, title="Open Purse", amount="1000.00"), headers=headers
+    )
+    open_purse_id = open_purse.json()["data"]["id"]
+
+    closed_purse = await client.post(
+        "/purses", json=_purse_payload(group_id, title="Closed Purse", amount="500.00"), headers=headers
+    )
+    closed_purse_id = closed_purse.json()["data"]["id"]
+
+    async def _mark_member_contribution_paid(purse_id: str) -> None:
+        result = await db_session.execute(
+            select(Contribution).where(
+                Contribution.purse_id == uuid.UUID(purse_id), Contribution.member_id.is_not(None)
+            )
+        )
+        contribution = result.scalar_one()
+        contribution.status = ContributionStatus.PAID
+        contribution.amount_received = contribution.amount_expected
+        await db_session.commit()
+
+    await _mark_member_contribution_paid(open_purse_id)
+    await _mark_member_contribution_paid(closed_purse_id)
+
+    close = await client.post(f"/purses/{closed_purse_id}/close", headers=headers)
+    assert close.status_code == 200
+
+    me = await client.get(f"/group-admins/me?group_id={group_id}", headers=headers)
+    # Only the open purse's paid amount counts -- the closed purse's 500.00
+    # is deliberately excluded.
+    assert me.json()["data"]["total_collected_across_open_purses"] == "1000.00"
 
 
 async def test_update_group_admin_me_edits_name_only(client, db_session):

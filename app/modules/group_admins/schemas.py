@@ -53,6 +53,12 @@ class GroupAdminMeResponse(BaseModel):
     purses_count: int
     members_count: int
     new_members_this_month: int
+    # A real server-side aggregate, not a client-side sum of the (capped,
+    # paginated) purses list -- see GroupAdminService.get_me. Excludes
+    # closed/archived purses, matching the dashboard's own "Total
+    # Collected" stat. Money is always a string on the wire -- see
+    # known-limitations.md.
+    total_collected_across_open_purses: str
 
 
 class GroupAdminUpdateRequest(BaseModel):

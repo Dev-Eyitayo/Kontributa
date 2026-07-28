@@ -1,6 +1,7 @@
 import re
 import secrets
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Optional
 from uuid import UUID
 
@@ -10,13 +11,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import ConflictError, ForbiddenError, NotFoundError
 from app.modules.auth.models import User
+from app.modules.contributions.models import Contribution, ContributionStatus
 from app.modules.group_admins.models import GroupAdmin
 from app.modules.group_admins.schemas import OnboardGroupAdminRequest
 from app.modules.invites.models import InviteLink
 from app.modules.invites.service import InviteService
 from app.modules.members.models import Member
 from app.modules.organizations.models import Group
-from app.modules.purses.models import Purse
+from app.modules.purses.models import Purse, PurseStatus
 
 
 def _slugify(name: str) -> str:
@@ -145,7 +147,9 @@ class GroupAdminService:
             )
         return out
 
-    async def get_me(self, user_id: UUID, group_id: UUID) -> tuple[GroupAdmin, User, Group, int, int, int]:
+    async def get_me(
+        self, user_id: UUID, group_id: UUID
+    ) -> tuple[GroupAdmin, User, Group, int, int, int, Decimal]:
         admin = await self.get_admin_for_group(user_id, group_id)
         user = await self.db.get(User, admin.user_id)
         group = await self.db.get(Group, admin.group_id)
@@ -176,7 +180,32 @@ class GroupAdminService:
         )
         purses_count = purses_count_result.scalar_one()
 
-        return admin, user, group, members_count, purses_count, new_members_this_month
+        # A real server-side aggregate across every open purse in the
+        # group, not a client-side sum of a capped, paginated purses
+        # list -- see docs/known-limitations.md's history of the Group
+        # Admin Dashboard's Total Collected stat. Closed/archived purses
+        # are deliberately excluded, matching what the dashboard shows.
+        collected_result = await self.db.execute(
+            select(func.coalesce(func.sum(Contribution.amount_received), 0))
+            .select_from(Contribution)
+            .join(Purse, Contribution.purse_id == Purse.id)
+            .where(
+                Purse.group_id == admin.group_id,
+                Purse.status == PurseStatus.OPEN,
+                Contribution.status.in_([ContributionStatus.PAID, ContributionStatus.PAID_MANUAL]),
+            )
+        )
+        total_collected_across_open_purses = collected_result.scalar_one()
+
+        return (
+            admin,
+            user,
+            group,
+            members_count,
+            purses_count,
+            new_members_this_month,
+            total_collected_across_open_purses,
+        )
 
     async def update_me(self, user_id: UUID, group_id: UUID, payload) -> tuple[GroupAdmin, User]:
         """first_name/last_name only -- organization, group, and role are

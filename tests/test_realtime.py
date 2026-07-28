@@ -34,7 +34,7 @@ async def test_realtime_token_rejected_for_another_members_contribution(client, 
         "/auth/register",
         json={
             "email": "other-rep@example.com",
-            "password": "password123",
+            "password": "P@ssword123",
             "first_name": "Other",
             "last_name": "Rep",
             "role": "group_admin",
@@ -42,7 +42,7 @@ async def test_realtime_token_rejected_for_another_members_contribution(client, 
     )
     verify_token = await find_redis_token("verify_email")
     await client.post("/auth/verify-email", json={"email": "other-rep@example.com", "token": verify_token})
-    login = await client.post("/auth/login", json={"email": "other-rep@example.com", "password": "password123"})
+    login = await client.post("/auth/login", json={"email": "other-rep@example.com", "password": "P@ssword123"})
     other_headers = {"Authorization": f"Bearer {login.json()['data']['access_token']}"}
     other_group = await onboard_group_admin(client, db_session, org, other_headers)
 
@@ -54,12 +54,12 @@ async def test_realtime_token_rejected_for_another_members_contribution(client, 
     token = invite.json()["data"]["token"]
     await client.post(
         f"/members/join/{token}",
-        json={"email": "other-member@example.com", "password": "password123", "first_name": "Bob", "last_name": "Two"},
+        json={"email": "other-member@example.com", "password": "P@ssword123", "first_name": "Bob", "last_name": "Two"},
     )
     other_member_verify = await find_redis_token("verify_email")
     await client.post("/auth/verify-email", json={"email": "other-member@example.com", "token": other_member_verify})
     other_member_login = await client.post(
-        "/auth/login", json={"email": "other-member@example.com", "password": "password123"}
+        "/auth/login", json={"email": "other-member@example.com", "password": "P@ssword123"}
     )
     other_member_headers = {"Authorization": f"Bearer {other_member_login.json()['data']['access_token']}"}
 

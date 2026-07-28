@@ -39,6 +39,12 @@ class UpdatePurseRequest(BaseModel):
     _normalize_deadline = field_validator("deadline")(_assume_utc_if_naive)
 
 
+class ReopenPurseRequest(BaseModel):
+    new_deadline: datetime
+
+    _normalize_deadline = field_validator("new_deadline")(_assume_utc_if_naive)
+
+
 class AddMemberToPurseRequest(BaseModel):
     member_id: UUID
 

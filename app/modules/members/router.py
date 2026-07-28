@@ -160,6 +160,7 @@ async def list_my_purses(
                 "title": purse.title,
                 "amount": str(purse.amount),
                 "deadline": purse.deadline.isoformat(),
+                "purse_status": purse.status.value,
                 "contribution_status": contribution.status.value,
                 "display_status": compute_display_status(contribution.status.value, purse.status.value),
                 "group": {"id": str(group.id), "name": group.name, "short_code": group.short_code},

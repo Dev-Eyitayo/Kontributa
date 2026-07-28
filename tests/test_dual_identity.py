@@ -9,7 +9,7 @@ existing "not onboarded yet, still gets an empty list" behavior."""
 from tests.conftest import create_org_and_group, find_redis_token, onboard_group_admin
 
 
-async def _register_verify_login(client, email: str, role: str, password: str = "password123") -> dict:
+async def _register_verify_login(client, email: str, role: str, password: str = "P@ssword123") -> dict:
     await client.post(
         "/auth/register",
         json={
@@ -74,7 +74,7 @@ async def test_member_can_onboard_as_group_admin(client, db_session):
         f"/members/join/{token}",
         json={
             "email": "dual-member@example.com",
-            "password": "password123",
+            "password": "P@ssword123",
             "first_name": "Dual",
             "last_name": "Identity",
         },
@@ -83,7 +83,7 @@ async def test_member_can_onboard_as_group_admin(client, db_session):
     verify_token = await find_redis_token("verify_email")
     await client.post("/auth/verify-email", json={"email": "dual-member@example.com", "token": verify_token})
     login = await client.post(
-        "/auth/login", json={"email": "dual-member@example.com", "password": "password123"}
+        "/auth/login", json={"email": "dual-member@example.com", "password": "P@ssword123"}
     )
     member_headers = {"Authorization": f"Bearer {login.json()['data']['access_token']}"}
 
@@ -206,7 +206,7 @@ async def test_member_without_group_admin_identity_still_forbidden_from_group_ad
         f"/members/join/{token}",
         json={
             "email": "plain-member@example.com",
-            "password": "password123",
+            "password": "P@ssword123",
             "first_name": "Plain",
             "last_name": "Member",
         },
@@ -215,7 +215,7 @@ async def test_member_without_group_admin_identity_still_forbidden_from_group_ad
     verify_token = await find_redis_token("verify_email")
     await client.post("/auth/verify-email", json={"email": "plain-member@example.com", "token": verify_token})
     login = await client.post(
-        "/auth/login", json={"email": "plain-member@example.com", "password": "password123"}
+        "/auth/login", json={"email": "plain-member@example.com", "password": "P@ssword123"}
     )
     member_headers = {"Authorization": f"Bearer {login.json()['data']['access_token']}"}
 

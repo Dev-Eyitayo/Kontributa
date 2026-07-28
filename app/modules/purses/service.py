@@ -124,6 +124,35 @@ class PurseService:
         await self.db.refresh(purse)
         return purse
 
+    async def reopen(self, admin: GroupAdmin, purse_id: UUID, new_deadline: datetime) -> Purse:
+        purse = await self.get_by_id(purse_id)
+        self._assert_group_scoped(admin, purse)
+
+        if purse.status != PurseStatus.CLOSED:
+            raise BusinessRuleError("only closed purses can be reopened", code="purse_not_closed")
+
+        now = datetime.now(timezone.utc)
+        deadline = new_deadline.replace(tzinfo=timezone.utc) if new_deadline.tzinfo is None else new_deadline
+        if deadline <= now:
+            raise BusinessRuleError("new deadline must be in the future", code="invalid_deadline")
+
+        before_state = {"status": purse.status.value, "deadline": purse.deadline.isoformat()}
+        purse.status = PurseStatus.OPEN
+        purse.deadline = deadline
+        await self.audit.record_event(
+            entity_type="purse",
+            entity_id=purse.id,
+            action="purse_reopened",
+            actor_type=AuditActorType.GROUP_ADMIN,
+            actor_id=admin.id,
+            before_state=before_state,
+            after_state={"status": PurseStatus.OPEN.value, "deadline": deadline.isoformat()},
+        )
+
+        await self.db.commit()
+        await self.db.refresh(purse)
+        return purse
+
     async def add_member(self, admin: GroupAdmin, purse_id: UUID, member_id: UUID) -> Contribution:
         """Manually backfills a single existing member onto a purse they
         weren't swept into -- e.g. a snapshot purse created before they

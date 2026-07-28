@@ -306,8 +306,12 @@ async def db_setup():
     yield
 
     async with admin_engine.begin() as conn:
+        if not USE_POSTGRES:
+            await conn.execute(text("PRAGMA foreign_keys = OFF"))
         for table in reversed(Base.metadata.sorted_tables):
             await conn.execute(table.delete())
+        if not USE_POSTGRES:
+            await conn.execute(text("PRAGMA foreign_keys = ON"))
         # audit_chain_head is infrastructure, not test data -- reseed its
         # single row so the next test's record_event() calls have a head
         # row to lock, in sync with audit_log having just been wiped too.

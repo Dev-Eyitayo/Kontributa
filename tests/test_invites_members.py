@@ -12,7 +12,7 @@ async def _register_and_login_group_admin(client, email="rep@example.com"):
         "/auth/register",
         json={
             "email": email,
-            "password": "password123",
+            "password": "P@ssword123",
             "first_name": "Tayo",
             "last_name": "Rep",
             "role": "group_admin",
@@ -20,7 +20,7 @@ async def _register_and_login_group_admin(client, email="rep@example.com"):
     )
     verify_token = await find_redis_token("verify_email")
     await client.post("/auth/verify-email", json={"email": email, "token": verify_token})
-    login = await client.post("/auth/login", json={"email": email, "password": "password123"})
+    login = await client.post("/auth/login", json={"email": email, "password": "P@ssword123"})
     return login.json()["data"]["access_token"]
 
 
@@ -90,7 +90,7 @@ async def test_resolve_invite_for_orgless_group_has_null_organization(client, db
         f"/members/join/{token}",
         json={
             "email": "orgless-member@example.com",
-            "password": "password123",
+            "password": "P@ssword123",
             "first_name": "No",
             "last_name": "Org",
             "member_id_number": "anything-goes-here",
@@ -136,7 +136,7 @@ async def test_join_success_and_profile_get_update(client, db_session):
         f"/members/join/{token}",
         json={
             "email": "ada@example.com",
-            "password": "password123",
+            "password": "P@ssword123",
             "first_name": "Ada",
             "last_name": "Lovelace",
             "member_id_number": "20/CSC/1234",
@@ -152,7 +152,7 @@ async def test_join_success_and_profile_get_update(client, db_session):
     verify_token = await find_redis_token("verify_email")
     await client.post("/auth/verify-email", json={"email": "ada@example.com", "token": verify_token})
     login = await client.post(
-        "/auth/login", json={"email": "ada@example.com", "password": "password123"}
+        "/auth/login", json={"email": "ada@example.com", "password": "P@ssword123"}
     )
     member_headers = {"Authorization": f"Bearer {login.json()['data']['access_token']}"}
 
@@ -185,7 +185,7 @@ async def test_join_with_null_cohort_when_group_has_none(client, db_session):
         f"/members/join/{token}",
         json={
             "email": "worker@example.com",
-            "password": "password123",
+            "password": "P@ssword123",
             "first_name": "Worker",
             "last_name": "Bee",
         },
@@ -203,7 +203,7 @@ async def test_join_rejects_member_id_number_not_matching_org_format(client, db_
         f"/members/join/{token}",
         json={
             "email": "badformat@example.com",
-            "password": "password123",
+            "password": "P@ssword123",
             "first_name": "Bad",
             "last_name": "Format",
             "member_id_number": "not-the-right-shape",
@@ -222,7 +222,7 @@ async def test_join_skips_validation_when_org_has_no_format_configured(client, d
         f"/members/join/{token}",
         json={
             "email": "anyformat@example.com",
-            "password": "password123",
+            "password": "P@ssword123",
             "first_name": "Any",
             "last_name": "Format",
             "member_id_number": "literally-anything-goes",
@@ -263,7 +263,7 @@ async def test_group_admin_can_list_members_who_joined_via_invite(client, db_ses
         f"/members/join/{token}",
         json={
             "email": "traceable@example.com",
-            "password": "password123",
+            "password": "P@ssword123",
             "first_name": "Traceable",
             "last_name": "Member",
         },
@@ -286,7 +286,7 @@ async def test_join_anonymous_rejects_existing_email_even_for_a_different_group(
         f"/members/join/{token_a}",
         json={
             "email": "multi-group@example.com",
-            "password": "password123",
+            "password": "P@ssword123",
             "first_name": "Multi",
             "last_name": "Group",
         },
@@ -316,7 +316,7 @@ async def test_join_additional_group_same_group_twice_still_409s(client, db_sess
         f"/members/join/{token}",
         json={
             "email": "same-group-twice@example.com",
-            "password": "password123",
+            "password": "P@ssword123",
             "first_name": "Same",
             "last_name": "Group",
         },
@@ -328,7 +328,7 @@ async def test_join_additional_group_same_group_twice_still_409s(client, db_sess
         "/auth/verify-email", json={"email": "same-group-twice@example.com", "token": verify_token}
     )
     login = await client.post(
-        "/auth/login", json={"email": "same-group-twice@example.com", "password": "password123"}
+        "/auth/login", json={"email": "same-group-twice@example.com", "password": "P@ssword123"}
     )
     member_headers = {"Authorization": f"Bearer {login.json()['data']['access_token']}"}
 
@@ -362,7 +362,7 @@ async def test_join_additional_group_succeeds_for_a_different_group(client, db_s
         f"/members/join/{token_a}",
         json={
             "email": "two-groups@example.com",
-            "password": "password123",
+            "password": "P@ssword123",
             "first_name": "Two",
             "last_name": "Groups",
         },
@@ -372,7 +372,7 @@ async def test_join_additional_group_succeeds_for_a_different_group(client, db_s
     verify_token = await find_redis_token("verify_email")
     await client.post("/auth/verify-email", json={"email": "two-groups@example.com", "token": verify_token})
     login = await client.post(
-        "/auth/login", json={"email": "two-groups@example.com", "password": "password123"}
+        "/auth/login", json={"email": "two-groups@example.com", "password": "P@ssword123"}
     )
     member_headers = {"Authorization": f"Bearer {login.json()['data']['access_token']}"}
 
@@ -439,7 +439,7 @@ async def test_update_me_member_id_number_is_scoped_per_group_not_global(client,
         f"/members/join/{token_a}",
         json={
             "email": "multi-group-id@example.com",
-            "password": "password123",
+            "password": "P@ssword123",
             "first_name": "Multi",
             "last_name": "Group",
             "member_id_number": "A-001",
@@ -450,7 +450,7 @@ async def test_update_me_member_id_number_is_scoped_per_group_not_global(client,
     verify_token = await find_redis_token("verify_email")
     await client.post("/auth/verify-email", json={"email": "multi-group-id@example.com", "token": verify_token})
     login = await client.post(
-        "/auth/login", json={"email": "multi-group-id@example.com", "password": "password123"}
+        "/auth/login", json={"email": "multi-group-id@example.com", "password": "P@ssword123"}
     )
     member_headers = {"Authorization": f"Bearer {login.json()['data']['access_token']}"}
 
@@ -511,7 +511,7 @@ async def test_members_me_purses_includes_contribution_id(client, db_session):
         f"/members/join/{token}",
         json={
             "email": "contribid@example.com",
-            "password": "password123",
+            "password": "P@ssword123",
             "first_name": "Contrib",
             "last_name": "Id",
         },
@@ -527,7 +527,7 @@ async def test_members_me_purses_includes_contribution_id(client, db_session):
     )
 
     login = await client.post(
-        "/auth/login", json={"email": "contribid@example.com", "password": "password123"}
+        "/auth/login", json={"email": "contribid@example.com", "password": "P@ssword123"}
     )
     member_headers = {"Authorization": f"Bearer {login.json()['data']['access_token']}"}
 
@@ -594,7 +594,7 @@ async def test_members_me_purses_can_be_scoped_to_one_group(client, db_session):
         f"/members/join/{token_a}",
         json={
             "email": "scope-member@example.com",
-            "password": "password123",
+            "password": "P@ssword123",
             "first_name": "Scope",
             "last_name": "Member",
         },
@@ -602,7 +602,7 @@ async def test_members_me_purses_can_be_scoped_to_one_group(client, db_session):
     assert join.status_code == 201
     verify_token = await find_redis_token("verify_email")
     await client.post("/auth/verify-email", json={"email": "scope-member@example.com", "token": verify_token})
-    login = await client.post("/auth/login", json={"email": "scope-member@example.com", "password": "password123"})
+    login = await client.post("/auth/login", json={"email": "scope-member@example.com", "password": "P@ssword123"})
     member_headers = {"Authorization": f"Bearer {login.json()['data']['access_token']}"}
 
     await client.post(

@@ -23,7 +23,7 @@ async def _setup_group_with_member(client, db_session, email="rep@example.com", 
         "/auth/register",
         json={
             "email": email,
-            "password": "password123",
+            "password": "P@ssword123",
             "first_name": "Tayo",
             "last_name": "Rep",
             "role": "group_admin",
@@ -31,7 +31,7 @@ async def _setup_group_with_member(client, db_session, email="rep@example.com", 
     )
     verify_token = await find_redis_token("verify_email")
     await client.post("/auth/verify-email", json={"email": email, "token": verify_token})
-    login = await client.post("/auth/login", json={"email": email, "password": "password123"})
+    login = await client.post("/auth/login", json={"email": email, "password": "P@ssword123"})
     admin_headers = {"Authorization": f"Bearer {login.json()['data']['access_token']}"}
     group = await onboard_group_admin(client, db_session, org, admin_headers)
 
@@ -41,7 +41,7 @@ async def _setup_group_with_member(client, db_session, email="rep@example.com", 
     token = invite.json()["data"]["token"]
     await client.post(
         f"/members/join/{token}",
-        json={"email": member_email, "password": "password123", "first_name": "Ada", "last_name": "Lovelace"},
+        json={"email": member_email, "password": "P@ssword123", "first_name": "Ada", "last_name": "Lovelace"},
     )
     member_verify_token = await find_redis_token("verify_email")
     await client.post("/auth/verify-email", json={"email": member_email, "token": member_verify_token})

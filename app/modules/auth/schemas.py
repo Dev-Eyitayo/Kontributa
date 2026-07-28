@@ -1,7 +1,9 @@
 from typing import Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
+
+from app.core.security import validate_strong_password
 
 
 class RegisterRequest(BaseModel):
@@ -10,6 +12,11 @@ class RegisterRequest(BaseModel):
     first_name: str = Field(min_length=1, max_length=100)
     last_name: str = Field(min_length=1, max_length=100)
     role: Literal["group_admin", "member"]
+
+    @field_validator("password")
+    @classmethod
+    def check_password_strength(cls, v: str) -> str:
+        return validate_strong_password(v)
 
 
 class RegisterResponse(BaseModel):
@@ -111,6 +118,11 @@ class ForgotPasswordResponse(BaseModel):
 class ResetPasswordRequest(BaseModel):
     token: str
     new_password: str = Field(min_length=8)
+
+    @field_validator("new_password")
+    @classmethod
+    def check_password_strength(cls, v: str) -> str:
+        return validate_strong_password(v)
 
 
 class ResetPasswordResponse(BaseModel):

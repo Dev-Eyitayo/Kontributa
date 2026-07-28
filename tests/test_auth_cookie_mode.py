@@ -11,7 +11,7 @@ async def _register_verify_login(client, monkeypatch, email="cookie-user@example
         "/auth/register",
         json={
             "email": email,
-            "password": "password123",
+            "password": "P@ssword123",
             "first_name": "Cookie",
             "last_name": "User",
             "role": "member",
@@ -21,7 +21,7 @@ async def _register_verify_login(client, monkeypatch, email="cookie-user@example
     await client.post("/auth/verify-email", json={"email": email, "token": verify_token})
 
     monkeypatch.setattr(settings, "USE_HTTPONLY_COOKIES", True)
-    return await client.post("/auth/login", json={"email": email, "password": "password123"})
+    return await client.post("/auth/login", json={"email": email, "password": "P@ssword123"})
 
 
 async def test_login_sets_httponly_cookies_and_omits_tokens_from_body(client, db_session, monkeypatch):
@@ -135,7 +135,7 @@ async def test_cookie_mode_member_join_via_invite_is_csrf_exempt(client, db_sess
         f"/members/join/{token}",
         json={
             "email": "cookie-member@example.com",
-            "password": "password123",
+            "password": "P@ssword123",
             "first_name": "Cookie",
             "last_name": "Member",
         },
@@ -153,7 +153,7 @@ async def test_csrf_middleware_inactive_when_flag_off(client, db_session):
         "/auth/register",
         json={
             "email": "no-csrf-needed@example.com",
-            "password": "password123",
+            "password": "P@ssword123",
             "first_name": "No",
             "last_name": "Csrf",
             "role": "member",
@@ -162,7 +162,7 @@ async def test_csrf_middleware_inactive_when_flag_off(client, db_session):
     verify_token = await find_redis_token("verify_email")
     await client.post("/auth/verify-email", json={"email": "no-csrf-needed@example.com", "token": verify_token})
     resp = await client.post(
-        "/auth/login", json={"email": "no-csrf-needed@example.com", "password": "password123"}
+        "/auth/login", json={"email": "no-csrf-needed@example.com", "password": "P@ssword123"}
     )
     assert resp.status_code == 200
     assert resp.json()["data"]["access_token"] is not None

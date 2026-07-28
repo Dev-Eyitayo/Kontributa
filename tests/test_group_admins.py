@@ -14,7 +14,7 @@ async def _register_and_login_group_admin(client, email="rep1@example.com"):
         "/auth/register",
         json={
             "email": email,
-            "password": "password123",
+            "password": "P@ssword123",
             "first_name": "Tayo",
             "last_name": "Rep",
             "role": "group_admin",
@@ -22,7 +22,7 @@ async def _register_and_login_group_admin(client, email="rep1@example.com"):
     )
     verify_token = await find_redis_token("verify_email")
     await client.post("/auth/verify-email", json={"email": email, "token": verify_token})
-    login = await client.post("/auth/login", json={"email": email, "password": "password123"})
+    login = await client.post("/auth/login", json={"email": email, "password": "P@ssword123"})
     token = login.json()["data"]["access_token"]
     return {"Authorization": f"Bearer {token}"}
 
@@ -224,7 +224,7 @@ async def test_list_members_shows_members_when_group_onboarded_with_a_cohort(cli
     token = invite.json()["data"]["token"]
     join = await client.post(
         f"/members/join/{token}",
-        json={"email": "member@example.com", "password": "password123", "first_name": "New", "last_name": "Member"},
+        json={"email": "member@example.com", "password": "P@ssword123", "first_name": "New", "last_name": "Member"},
     )
     assert join.status_code == 201
     # The member correctly inherits the group's cohort, set at onboarding.
@@ -265,12 +265,12 @@ async def test_update_group_sets_cohort_retroactive_for_members_not_purses(clien
     token_before = invite_before.json()["data"]["token"]
     await client.post(
         f"/members/join/{token_before}",
-        json={"email": "early@example.com", "password": "password123", "first_name": "Early", "last_name": "Bird"},
+        json={"email": "early@example.com", "password": "P@ssword123", "first_name": "Early", "last_name": "Bird"},
     )
     early_verify = await find_redis_token("verify_email")
     await client.post("/auth/verify-email", json={"email": "early@example.com", "token": early_verify})
     early_login = await client.post(
-        "/auth/login", json={"email": "early@example.com", "password": "password123"}
+        "/auth/login", json={"email": "early@example.com", "password": "P@ssword123"}
     )
     early_headers = {"Authorization": f"Bearer {early_login.json()['data']['access_token']}"}
 
@@ -318,7 +318,7 @@ async def test_update_group_sets_cohort_retroactive_for_members_not_purses(clien
     token_after = invite_after.json()["data"]["token"]
     join_after = await client.post(
         f"/members/join/{token_after}",
-        json={"email": "late@example.com", "password": "password123", "first_name": "Late", "last_name": "Comer"},
+        json={"email": "late@example.com", "password": "P@ssword123", "first_name": "Late", "last_name": "Comer"},
     )
     assert join_after.json()["data"]["cohort"] == "500L"
 
@@ -552,7 +552,7 @@ async def test_members_pagination(client, db_session):
             f"/members/join/{token}",
             json={
                 "email": f"page-member-{n}@example.com",
-                "password": "password123",
+                "password": "P@ssword123",
                 "first_name": "Member",
                 "last_name": str(n),
             },

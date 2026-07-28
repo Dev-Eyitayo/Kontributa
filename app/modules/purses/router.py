@@ -41,6 +41,7 @@ from app.modules.purses.schemas import (
     PurseStatusResponse,
     PurseSummary,
     PurseUpdateResponse,
+    ReopenPurseRequest,
     UpdatePurseRequest,
 )
 from app.modules.purses.service import PurseService
@@ -294,6 +295,22 @@ async def close_purse(
     admin = await admin_service.get_admin_for_group(current_user.id, target.group_id)
     purse = await purse_service.close(admin, purse_id)
     return success_response({"id": str(purse.id), "status": purse.status.value})
+
+
+@router.post("/{purse_id}/reopen", response_model=StandardResponse[PurseStatusResponse])
+async def reopen_purse(
+    purse_id: UUID,
+    payload: ReopenPurseRequest,
+    current_user: CurrentUser = Depends(get_current_group_admin_user),
+    purse_service: PurseService = Depends(get_purse_service),
+    admin_service: GroupAdminService = Depends(get_group_admin_service),
+) -> JSONResponse:
+    target = await purse_service.get_by_id(purse_id)
+    admin = await admin_service.get_admin_for_group(current_user.id, target.group_id)
+    purse = await purse_service.reopen(admin, purse_id, payload.new_deadline)
+    return success_response(
+        {"id": str(purse.id), "status": purse.status.value, "deadline": purse.deadline.isoformat()}
+    )
 
 
 @router.get("/{purse_id}/contributions", response_model=StandardResponse[Paginated[ContributionListItem]])

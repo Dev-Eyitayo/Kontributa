@@ -27,7 +27,7 @@ async def _get_last_active(family_id: str):
     return datetime.fromtimestamp(int(raw), tz=timezone.utc)
 
 
-async def _register(client, email="member1@example.com", role="member", password="password123"):
+async def _register(client, email="member1@example.com", role="member", password="P@ssword123"):
     return await client.post(
         "/auth/register",
         json={
@@ -70,7 +70,7 @@ async def test_simultaneous_duplicate_registration_returns_clean_409(client):
     # (non-racing) path returns, not an unhandled 500.
     payload = {
         "email": "race-condition@example.com",
-        "password": "password123",
+        "password": "P@ssword123",
         "first_name": "Race",
         "last_name": "Condition",
         "role": "member",
@@ -85,6 +85,22 @@ async def test_simultaneous_duplicate_registration_returns_clean_409(client):
 
     loser = next(r for r in results if r.status_code == 409)
     assert loser.json()["error"]["code"] == "duplicate_email"
+
+
+async def test_register_rejects_weak_passwords(client):
+    weak_passwords = ["12345678", "password", "Password123", "P@ssword", "p@ssword123"]
+    for idx, weak_pwd in enumerate(weak_passwords):
+        resp = await client.post(
+            "/auth/register",
+            json={
+                "email": f"weak{idx}@example.com",
+                "password": weak_pwd,
+                "first_name": "Weak",
+                "last_name": "Pass",
+                "role": "member",
+            },
+        )
+        assert resp.status_code == 422
 
 
 async def test_verify_email_success(client):
@@ -180,11 +196,11 @@ async def test_login_success_and_invalid_credentials(client):
 
 
 async def test_get_me_returns_current_user(client):
-    await _register(client, email="meendpoint@example.com", password="password123")
+    await _register(client, email="meendpoint@example.com", password="P@ssword123")
     verify_token = await find_redis_token("verify_email")
     await client.post("/auth/verify-email", json={"email": "meendpoint@example.com", "token": verify_token})
     login = await client.post(
-        "/auth/login", json={"email": "meendpoint@example.com", "password": "password123"}
+        "/auth/login", json={"email": "meendpoint@example.com", "password": "P@ssword123"}
     )
     headers = {"Authorization": f"Bearer {login.json()['data']['access_token']}"}
 
@@ -205,9 +221,9 @@ async def test_get_me_returns_current_user(client):
 
 async def test_unverified_account_cannot_log_in_group_admin_or_member(client):
     # Applies uniformly to both roles -- verification isn't role-specific.
-    await _register(client, email="unverified-admin@example.com", role="group_admin", password="password123")
+    await _register(client, email="unverified-admin@example.com", role="group_admin", password="P@ssword123")
     admin_login = await client.post(
-        "/auth/login", json={"email": "unverified-admin@example.com", "password": "password123"}
+        "/auth/login", json={"email": "unverified-admin@example.com", "password": "P@ssword123"}
     )
     assert admin_login.status_code == 403
     body = admin_login.json()
@@ -224,9 +240,9 @@ async def test_unverified_account_cannot_log_in_group_admin_or_member(client):
         "/auth/verify-email", json={"email": "unverified-admin@example.com", "token": admin_verify_token}
     )
 
-    await _register(client, email="unverified-member@example.com", role="member", password="password123")
+    await _register(client, email="unverified-member@example.com", role="member", password="P@ssword123")
     member_login = await client.post(
-        "/auth/login", json={"email": "unverified-member@example.com", "password": "password123"}
+        "/auth/login", json={"email": "unverified-member@example.com", "password": "P@ssword123"}
     )
     assert member_login.status_code == 403
     assert member_login.json()["error"]["code"] == "email_not_verified"
@@ -237,7 +253,7 @@ async def test_unverified_account_cannot_log_in_group_admin_or_member(client):
         "/auth/verify-email", json={"email": "unverified-member@example.com", "token": verify_token}
     )
     now_verified = await client.post(
-        "/auth/login", json={"email": "unverified-member@example.com", "password": "password123"}
+        "/auth/login", json={"email": "unverified-member@example.com", "password": "P@ssword123"}
     )
     assert now_verified.status_code == 200
     assert "access_token" in now_verified.json()["data"]
@@ -271,7 +287,7 @@ async def test_refresh_token_rotation_and_reuse_detection(client):
 
 
 async def test_forgot_and_reset_password(client):
-    await _register(client, email="resetme@example.com", password="oldpassword123")
+    await _register(client, email="resetme@example.com", password="oldP@ssword123")
     verify_token = await find_redis_token("verify_email")
     await client.post("/auth/verify-email", json={"email": "resetme@example.com", "token": verify_token})
 
@@ -286,7 +302,7 @@ async def test_forgot_and_reset_password(client):
     assert reset.status_code == 200
 
     old_login = await client.post(
-        "/auth/login", json={"email": "resetme@example.com", "password": "oldpassword123"}
+        "/auth/login", json={"email": "resetme@example.com", "password": "oldP@ssword123"}
     )
     assert old_login.status_code == 401
 
@@ -303,11 +319,11 @@ async def test_forgot_password_unknown_email_still_returns_200(client):
 
 
 async def test_logout_revokes_refresh_token_and_blacklists_access_token(client):
-    await _register(client, email="logout-test@example.com", role="group_admin", password="password123")
+    await _register(client, email="logout-test@example.com", role="group_admin", password="P@ssword123")
     verify_token = await find_redis_token("verify_email")
     await client.post("/auth/verify-email", json={"email": "logout-test@example.com", "token": verify_token})
     login = await client.post(
-        "/auth/login", json={"email": "logout-test@example.com", "password": "password123"}
+        "/auth/login", json={"email": "logout-test@example.com", "password": "P@ssword123"}
     )
     access_token = login.json()["data"]["access_token"]
     refresh_token = login.json()["data"]["refresh_token"]
@@ -339,10 +355,10 @@ async def test_refresh_token_ttl_is_driven_by_the_env_setting_not_hardcoded(clie
     # have come from reading the setting at issue-time, not a literal.
     monkeypatch.setattr(settings, "REFRESH_TOKEN_EXPIRE_DAYS", 3)
 
-    await _register(client, email="ttl-check@example.com", password="password123")
+    await _register(client, email="ttl-check@example.com", password="P@ssword123")
     verify_token = await find_redis_token("verify_email")
     await client.post("/auth/verify-email", json={"email": "ttl-check@example.com", "token": verify_token})
-    login = await client.post("/auth/login", json={"email": "ttl-check@example.com", "password": "password123"})
+    login = await client.post("/auth/login", json={"email": "ttl-check@example.com", "password": "P@ssword123"})
     refresh_token = login.json()["data"]["refresh_token"]
 
     ttl_seconds = await _state["redis"].ttl(f"refresh:{refresh_token}")
@@ -352,10 +368,10 @@ async def test_refresh_token_ttl_is_driven_by_the_env_setting_not_hardcoded(clie
 
 
 async def test_heartbeat_updates_last_active_at_for_the_current_session(client):
-    await _register(client, email="heartbeat@example.com", password="password123")
+    await _register(client, email="heartbeat@example.com", password="P@ssword123")
     verify_token = await find_redis_token("verify_email")
     await client.post("/auth/verify-email", json={"email": "heartbeat@example.com", "token": verify_token})
-    login = await client.post("/auth/login", json={"email": "heartbeat@example.com", "password": "password123"})
+    login = await client.post("/auth/login", json={"email": "heartbeat@example.com", "password": "P@ssword123"})
     access_token = login.json()["data"]["access_token"]
 
     family_id = await _get_family_id()
@@ -377,10 +393,10 @@ async def test_refresh_is_rejected_after_the_inactivity_gap_exceeds_the_threshol
     nowhere near its own absolute TTL must be rejected once too long has
     passed since the last *genuine* activity -- and the session must be
     fully revoked, not just this one request refused."""
-    await _register(client, email="idle-out@example.com", password="password123")
+    await _register(client, email="idle-out@example.com", password="P@ssword123")
     verify_token = await find_redis_token("verify_email")
     await client.post("/auth/verify-email", json={"email": "idle-out@example.com", "token": verify_token})
-    login = await client.post("/auth/login", json={"email": "idle-out@example.com", "password": "password123"})
+    login = await client.post("/auth/login", json={"email": "idle-out@example.com", "password": "P@ssword123"})
     refresh_token = login.json()["data"]["refresh_token"]
 
     family_id = await _get_family_id()
@@ -404,11 +420,11 @@ async def test_refresh_survives_light_but_real_activity_spaced_past_access_token
     minutes ago: well past the access token's own 15-minute lifetime
     (so a refresh is genuinely necessary), but comfortably inside the
     30-minute inactivity threshold."""
-    await _register(client, email="still-active@example.com", password="password123")
+    await _register(client, email="still-active@example.com", password="P@ssword123")
     verify_token = await find_redis_token("verify_email")
     await client.post("/auth/verify-email", json={"email": "still-active@example.com", "token": verify_token})
     login = await client.post(
-        "/auth/login", json={"email": "still-active@example.com", "password": "password123"}
+        "/auth/login", json={"email": "still-active@example.com", "password": "P@ssword123"}
     )
     refresh_token = login.json()["data"]["refresh_token"]
 
@@ -427,11 +443,11 @@ async def test_refresh_itself_never_counts_as_activity(client):
     reset last_active_at -- otherwise an abandoned-but-open tab with any
     ambient background traffic would keep refreshing its own inactivity
     window forever and never actually time out."""
-    await _register(client, email="no-self-credit@example.com", password="password123")
+    await _register(client, email="no-self-credit@example.com", password="P@ssword123")
     verify_token = await find_redis_token("verify_email")
     await client.post("/auth/verify-email", json={"email": "no-self-credit@example.com", "token": verify_token})
     login = await client.post(
-        "/auth/login", json={"email": "no-self-credit@example.com", "password": "password123"}
+        "/auth/login", json={"email": "no-self-credit@example.com", "password": "P@ssword123"}
     )
     refresh_token = login.json()["data"]["refresh_token"]
 

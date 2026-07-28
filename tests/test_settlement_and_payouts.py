@@ -21,7 +21,7 @@ async def _register_and_login_group_admin(client, email="rep@example.com"):
         "/auth/register",
         json={
             "email": email,
-            "password": "password123",
+            "password": "P@ssword123",
             "first_name": "Tayo",
             "last_name": "Rep",
             "role": "group_admin",
@@ -29,7 +29,7 @@ async def _register_and_login_group_admin(client, email="rep@example.com"):
     )
     verify_token = await find_redis_token("verify_email")
     await client.post("/auth/verify-email", json={"email": email, "token": verify_token})
-    login = await client.post("/auth/login", json={"email": email, "password": "password123"})
+    login = await client.post("/auth/login", json={"email": email, "password": "P@ssword123"})
     return login.json()["data"]["access_token"]
 
 
@@ -49,7 +49,7 @@ async def _setup_purse_with_paid_contribution(client, db_session, collected="250
     token = invite.json()["data"]["token"]
     await client.post(
         f"/members/join/{token}",
-        json={"email": f"member-{email}", "password": "password123", "first_name": "Member", "last_name": "One"},
+        json={"email": f"member-{email}", "password": "P@ssword123", "first_name": "Member", "last_name": "One"},
     )
     # Consumed immediately, not left dangling -- an unconsumed verify_email
     # token here would sit in Redis and collide with the next unrelated
@@ -58,6 +58,7 @@ async def _setup_purse_with_paid_contribution(client, db_session, collected="250
     # to tell two coexisting tokens apart and can grab the wrong one.
     member_verify_token = await find_redis_token("verify_email")
     await client.post("/auth/verify-email", json={"email": f"member-{email}", "token": member_verify_token})
+    client.cookies.clear()
 
     create = await client.post(
         "/purses",
@@ -203,7 +204,7 @@ async def test_list_banks_requires_group_admin_role(client, db_session):
         f"/members/join/{token}",
         json={
             "email": "banks-member@example.com",
-            "password": "password123",
+            "password": "P@ssword123",
             "first_name": "Bank",
             "last_name": "Member",
         },
@@ -211,7 +212,7 @@ async def test_list_banks_requires_group_admin_role(client, db_session):
     verify_token = await find_redis_token("verify_email")
     await client.post("/auth/verify-email", json={"email": "banks-member@example.com", "token": verify_token})
     login = await client.post(
-        "/auth/login", json={"email": "banks-member@example.com", "password": "password123"}
+        "/auth/login", json={"email": "banks-member@example.com", "password": "P@ssword123"}
     )
     member_headers = {"Authorization": f"Bearer {login.json()['data']['access_token']}"}
 
@@ -535,11 +536,11 @@ async def test_member_cannot_list_or_view_payouts(client, db_session):
     token = invite.json()["data"]["token"]
     await client.post(
         f"/members/join/{token}",
-        json={"email": "onlooker@example.com", "password": "password123", "first_name": "On", "last_name": "Looker"},
+        json={"email": "onlooker@example.com", "password": "P@ssword123", "first_name": "On", "last_name": "Looker"},
     )
     verify_token = await find_redis_token("verify_email")
     await client.post("/auth/verify-email", json={"email": "onlooker@example.com", "token": verify_token})
-    login = await client.post("/auth/login", json={"email": "onlooker@example.com", "password": "password123"})
+    login = await client.post("/auth/login", json={"email": "onlooker@example.com", "password": "P@ssword123"})
     member_headers = {"Authorization": f"Bearer {login.json()['data']['access_token']}"}
 
     list_resp = await client.get("/payouts", headers=member_headers)
@@ -633,11 +634,11 @@ async def _setup_purse_with_verified_pending_member(client, db_session, email="r
     member_email = f"member-{email}"
     await client.post(
         f"/members/join/{token}",
-        json={"email": member_email, "password": "password123", "first_name": "Member", "last_name": "One"},
+        json={"email": member_email, "password": "P@ssword123", "first_name": "Member", "last_name": "One"},
     )
     member_verify_token = await find_redis_token("verify_email")
     await client.post("/auth/verify-email", json={"email": member_email, "token": member_verify_token})
-    member_login = await client.post("/auth/login", json={"email": member_email, "password": "password123"})
+    member_login = await client.post("/auth/login", json={"email": member_email, "password": "P@ssword123"})
     member_headers = {"Authorization": f"Bearer {member_login.json()['data']['access_token']}"}
 
     create = await client.post(

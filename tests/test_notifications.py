@@ -25,7 +25,7 @@ async def _register_and_login_group_admin(client, email="rep@example.com"):
         "/auth/register",
         json={
             "email": email,
-            "password": "password123",
+            "password": "P@ssword123",
             "first_name": "Tayo",
             "last_name": "Rep",
             "role": "group_admin",
@@ -33,18 +33,18 @@ async def _register_and_login_group_admin(client, email="rep@example.com"):
     )
     verify_token = await find_redis_token("verify_email")
     await client.post("/auth/verify-email", json={"email": email, "token": verify_token})
-    login = await client.post("/auth/login", json={"email": email, "password": "password123"})
+    login = await client.post("/auth/login", json={"email": email, "password": "P@ssword123"})
     return login.json()["data"]["access_token"]
 
 
 async def _register_and_login_member(client, token, email, first_name="Ada", last_name="Lovelace"):
     await client.post(
         f"/members/join/{token}",
-        json={"email": email, "password": "password123", "first_name": first_name, "last_name": last_name},
+        json={"email": email, "password": "P@ssword123", "first_name": first_name, "last_name": last_name},
     )
     verify_token = await find_redis_token("verify_email")
     await client.post("/auth/verify-email", json={"email": email, "token": verify_token})
-    login = await client.post("/auth/login", json={"email": email, "password": "password123"})
+    login = await client.post("/auth/login", json={"email": email, "password": "P@ssword123"})
     return login.json()["data"]["access_token"]
 
 
@@ -184,7 +184,7 @@ async def _setup_purse_with_paid_contribution(client, db_session, collected="250
     token = invite.json()["data"]["token"]
     await client.post(
         f"/members/join/{token}",
-        json={"email": f"member-{email}", "password": "password123", "first_name": "Member", "last_name": "One"},
+        json={"email": f"member-{email}", "password": "P@ssword123", "first_name": "Member", "last_name": "One"},
     )
 
     create = await client.post(
@@ -239,7 +239,7 @@ async def test_register_sends_verification_email(client):
         "/auth/register",
         json={
             "email": "newuser@example.com",
-            "password": "password123",
+            "password": "P@ssword123",
             "first_name": "New",
             "last_name": "User",
             "role": "group_admin",
@@ -258,7 +258,7 @@ async def test_forgot_password_sends_reset_email(client, db_session):
         "/auth/register",
         json={
             "email": "resetme@example.com",
-            "password": "password123",
+            "password": "P@ssword123",
             "first_name": "Reset",
             "last_name": "Me",
             "role": "group_admin",
@@ -283,7 +283,7 @@ async def test_register_rate_limited_after_burst(client):
                 "/auth/register",
                 json={
                     "email": f"burst{i}@example.com",
-                    "password": "password123",
+                    "password": "P@ssword123",
                     "first_name": "Burst",
                     "last_name": "Tester",
                     "role": "group_admin",
@@ -360,7 +360,7 @@ async def test_notification_log_records_each_send(client, db_session):
         "/auth/register",
         json={
             "email": "logtest@example.com",
-            "password": "password123",
+            "password": "P@ssword123",
             "first_name": "Log",
             "last_name": "Test",
             "role": "group_admin",

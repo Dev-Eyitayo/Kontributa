@@ -71,9 +71,11 @@ def compute_display_status(contribution_status: str, purse_status: str) -> str:
     functionally "pending" from the member's perspective -- they can
     regenerate and pay any time before the purse actually closes, so
     showing a bare "Expired" there reads as terminal when it isn't. Once
-    the purse itself has closed, or for every other status, the raw
-    value is already accurate and passes through unchanged.
+    the purse itself has closed, unpaid pending contributions display as
+    "closed" so they no longer appear as active pending items.
     """
+    if purse_status == PurseStatus.CLOSED.value and contribution_status == ContributionStatus.PENDING.value:
+        return "closed"
     if contribution_status == ContributionStatus.EXPIRED.value and purse_status == PurseStatus.OPEN.value:
         return ContributionStatus.PENDING.value
     return contribution_status

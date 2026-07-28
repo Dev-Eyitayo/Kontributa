@@ -19,7 +19,7 @@ async def _register_and_login_group_admin(client, email="rep@example.com"):
         "/auth/register",
         json={
             "email": email,
-            "password": "password123",
+            "password": "P@ssword123",
             "first_name": "Tayo",
             "last_name": "Rep",
             "role": "group_admin",
@@ -27,7 +27,7 @@ async def _register_and_login_group_admin(client, email="rep@example.com"):
     )
     verify_token = await find_redis_token("verify_email")
     await client.post("/auth/verify-email", json={"email": email, "token": verify_token})
-    login = await client.post("/auth/login", json={"email": email, "password": "password123"})
+    login = await client.post("/auth/login", json={"email": email, "password": "P@ssword123"})
     return login.json()["data"]["access_token"]
 
 
@@ -86,7 +86,7 @@ async def test_two_co_admins_each_get_their_own_contribution_row(client, db_sess
         "/auth/register",
         json={
             "email": co_admin_email,
-            "password": "password123",
+            "password": "P@ssword123",
             "first_name": "Co",
             "last_name": "Admin",
             "role": "group_admin",
@@ -94,7 +94,7 @@ async def test_two_co_admins_each_get_their_own_contribution_row(client, db_sess
     )
     verify_token = await find_redis_token("verify_email")
     await client.post("/auth/verify-email", json={"email": co_admin_email, "token": verify_token})
-    await client.post("/auth/login", json={"email": co_admin_email, "password": "password123"})
+    await client.post("/auth/login", json={"email": co_admin_email, "password": "P@ssword123"})
 
     co_admin_user = (
         (await db_session.execute(select(User).where(User.email == co_admin_email)))
@@ -141,7 +141,7 @@ async def test_admin_cannot_generate_invoice_for_another_admins_contribution(cli
         "/auth/register",
         json={
             "email": co_admin_email,
-            "password": "password123",
+            "password": "P@ssword123",
             "first_name": "Co",
             "last_name": "Admin",
             "role": "group_admin",
@@ -149,7 +149,7 @@ async def test_admin_cannot_generate_invoice_for_another_admins_contribution(cli
     )
     verify_token = await find_redis_token("verify_email")
     await client.post("/auth/verify-email", json={"email": co_admin_email, "token": verify_token})
-    login = await client.post("/auth/login", json={"email": co_admin_email, "password": "password123"})
+    login = await client.post("/auth/login", json={"email": co_admin_email, "password": "P@ssword123"})
     co_admin_headers = {"Authorization": f"Bearer {login.json()['data']['access_token']}"}
 
     co_admin_user = (

@@ -74,6 +74,7 @@ class MemberPurseListItem(BaseModel):
     title: str
     amount: str
     deadline: str
+    purse_status: str
     contribution_status: str
     # Display-layer only -- an "expired" invoice on a purse that's still
     # open shows as "pending" here (the member can regenerate and pay any

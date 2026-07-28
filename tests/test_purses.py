@@ -9,7 +9,7 @@ async def _register_and_login_group_admin(client, email="rep@example.com"):
         "/auth/register",
         json={
             "email": email,
-            "password": "password123",
+            "password": "P@ssword123",
             "first_name": "Tayo",
             "last_name": "Rep",
             "role": "group_admin",
@@ -17,18 +17,18 @@ async def _register_and_login_group_admin(client, email="rep@example.com"):
     )
     verify_token = await find_redis_token("verify_email")
     await client.post("/auth/verify-email", json={"email": email, "token": verify_token})
-    login = await client.post("/auth/login", json={"email": email, "password": "password123"})
+    login = await client.post("/auth/login", json={"email": email, "password": "P@ssword123"})
     return login.json()["data"]["access_token"]
 
 
 async def _register_and_login_member(client, token, email, first_name="Member", last_name="One"):
     await client.post(
         f"/members/join/{token}",
-        json={"email": email, "password": "password123", "first_name": first_name, "last_name": last_name},
+        json={"email": email, "password": "P@ssword123", "first_name": first_name, "last_name": last_name},
     )
     verify_token = await find_redis_token("verify_email")
     await client.post("/auth/verify-email", json={"email": email, "token": verify_token})
-    login = await client.post("/auth/login", json={"email": email, "password": "password123"})
+    login = await client.post("/auth/login", json={"email": email, "password": "P@ssword123"})
     return login.json()["data"]["access_token"]
 
 
@@ -264,6 +264,33 @@ async def test_cannot_edit_closed_purse(client, db_session):
     assert resp.json()["error"]["code"] == "purse_not_open"
 
 
+async def test_reopen_closed_purse(client, db_session):
+    org, group, headers = await _setup_group_with_admin(client, db_session)
+    create = await client.post(
+        "/purses",
+        json=_purse_payload(group.id, title="Reopenable Fee"),
+        headers=headers,
+    )
+    purse_id = create.json()["data"]["id"]
+
+    close = await client.post(f"/purses/{purse_id}/close", headers=headers)
+    assert close.status_code == 200
+    assert close.json()["data"]["status"] == "closed"
+
+    future_date = (datetime.now(timezone.utc) + timedelta(days=14)).isoformat()
+    reopen = await client.post(
+        f"/purses/{purse_id}/reopen",
+        json={"new_deadline": future_date},
+        headers=headers,
+    )
+    assert reopen.status_code == 200
+    assert reopen.json()["data"]["status"] == "open"
+
+    detail = await client.get(f"/purses/{purse_id}", headers=headers)
+    assert detail.status_code == 200
+    assert detail.json()["data"]["status"] == "open"
+
+
 async def test_rep_cannot_manage_another_reps_purse(client, db_session):
     org, group, headers_a = await _setup_group_with_admin(client, db_session)
 
@@ -441,7 +468,7 @@ async def test_purse_specific_invite_grants_eligibility_even_for_snapshot_purse(
         f"/members/join/{token}",
         json={
             "email": "purse-specific@example.com",
-            "password": "password123",
+            "password": "P@ssword123",
             "first_name": "Late",
             "last_name": "Joiner",
         },
@@ -450,7 +477,7 @@ async def test_purse_specific_invite_grants_eligibility_even_for_snapshot_purse(
     verify_token = await find_redis_token("verify_email")
     await client.post("/auth/verify-email", json={"email": "purse-specific@example.com", "token": verify_token})
     login = await client.post(
-        "/auth/login", json={"email": "purse-specific@example.com", "password": "password123"}
+        "/auth/login", json={"email": "purse-specific@example.com", "password": "P@ssword123"}
     )
     member_headers = {"Authorization": f"Bearer {login.json()['data']['access_token']}"}
 

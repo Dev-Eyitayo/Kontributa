@@ -18,7 +18,7 @@ from scripts.cleanup_self_referential_memberships import clean_up, find_self_ref
 from tests.conftest import create_org_and_group, find_redis_token, onboard_group_admin
 
 
-async def _register_verify_login(client, email: str, password: str = "password123") -> tuple[dict, str]:
+async def _register_verify_login(client, email: str, password: str = "P@ssword123") -> tuple[dict, str]:
     reg = await client.post(
         "/auth/register",
         json={

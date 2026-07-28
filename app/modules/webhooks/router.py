@@ -15,6 +15,7 @@ from app.modules.webhooks.schemas import ReceivedResponse
 from app.modules.webhooks.service import (
     WebhookService,
     process_collection_webhook_event,
+    process_settlement_webhook_event,
     process_transfer_webhook_event,
 )
 
@@ -36,15 +37,24 @@ async def monnify_webhook(
         raise AuthError("invalid webhook signature", code="invalid_signature")
 
     payload = json.loads(raw_body)
+    event_type = payload.get("eventType")
     event_data = payload.get("eventData", {})
-    provider_event_id = event_data.get("transactionReference") or payload.get("transactionReference")
+    provider_event_id = (
+        event_data.get("settlementReference")
+        or event_data.get("transactionReference")
+        or payload.get("transactionReference")
+        or payload.get("settlementReference")
+    )
 
     service = WebhookService(db)
     event, is_new = await service.store_event(provider_event_id, raw_body.decode(), signature_valid=True)
 
     if is_new:
         session_factory = async_sessionmaker(bind=db.bind, expire_on_commit=False)
-        background_tasks.add_task(process_collection_webhook_event, event.id, session_factory, sendbyte, realtime)
+        if event_type in ("SUCCESSFUL_SETTLEMENT", "SETTLEMENT_COMPLETED"):
+            background_tasks.add_task(process_settlement_webhook_event, event.id, session_factory, payload)
+        else:
+            background_tasks.add_task(process_collection_webhook_event, event.id, session_factory, sendbyte, realtime)
 
     return success_response({"received": True}, status_code=202)
 

@@ -14,6 +14,7 @@ from app.modules.payments.service import parse_monnify_datetime
 from app.modules.payouts.models import Payout, PayoutStatus
 from app.modules.payouts.service import PayoutService
 from app.modules.realtime.service import RealtimeService
+from app.modules.settlement.models import MonnifySettlementLog, SettlementAccount
 from app.modules.webhooks.models import WebhookEvent
 from app.modules.webhooks.schemas import CollectionEventData, RejectedPaymentEventData, TransferEventData
 
@@ -238,3 +239,72 @@ async def _process_rejected_payment_event(
         contribution.id,
         data.rejection_reason,
     )
+
+
+async def process_settlement_webhook_event(
+    event_id: UUID,
+    session_factory: async_sessionmaker[AsyncSession],
+    payload: dict,
+) -> None:
+    """Processes a Monnify SUCCESSFUL_SETTLEMENT or SETTLEMENT_COMPLETED event."""
+    async with session_factory() as db:
+        service = WebhookService(db)
+        event = await db.get(WebhookEvent, event_id)
+        if event is None:
+            return
+
+        try:
+            event_data = payload.get("eventData", {})
+            settlement_ref = (
+                event_data.get("settlementReference")
+                or event_data.get("reference")
+                or str(event_id)
+            )
+            sub_account_code = event_data.get("subAccountCode", "")
+
+            # Look up matching settlement account to find group_id
+            group_id = None
+            if sub_account_code:
+                result = await db.execute(
+                    select(SettlementAccount.group_id).where(
+                        SettlementAccount.direct_sub_account_code == sub_account_code
+                    )
+                )
+                group_id = result.scalar_one_or_none()
+
+            amount = float(event_data.get("amount") or 0.0)
+            fee = float(event_data.get("fee") or 0.0)
+            settled_amount = float(event_data.get("settledAmount") or (amount - fee))
+
+            settlement_time_str = event_data.get("settlementTime") or event_data.get("completedOn")
+            settlement_time = parse_monnify_datetime(settlement_time_str) if settlement_time_str else None
+
+            log_entry = MonnifySettlementLog(
+                settlement_reference=settlement_ref,
+                sub_account_code=sub_account_code,
+                group_id=group_id,
+                amount=amount,
+                fee=fee,
+                settled_amount=settled_amount,
+                destination_account_name=event_data.get("destinationAccountName"),
+                destination_account_number=event_data.get("destinationAccountNumber"),
+                destination_bank_code=event_data.get("destinationBankCode"),
+                destination_bank_name=event_data.get("destinationBankName"),
+                status=event_data.get("status", "COMPLETED"),
+                settlement_time=settlement_time,
+                raw_payload=json.dumps(payload),
+            )
+            db.add(log_entry)
+            try:
+                await db.commit()
+            except IntegrityError:
+                await db.rollback()
+                logger.info("settlement reference %s already logged", settlement_ref)
+
+            await service.mark_processed(event.id)
+            logger.info("processed settlement webhook event %s (%s)", event_id, settlement_ref)
+
+        except Exception as exc:
+            await service.mark_processed(event.id, error=str(exc))
+            logger.exception("failed processing settlement webhook event %s", event_id)
+

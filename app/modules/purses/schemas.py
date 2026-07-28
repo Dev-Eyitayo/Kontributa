@@ -124,6 +124,8 @@ class PurseListItemAdminOut(PurseOut):
     # Money is always a string on the wire (never a bare JSON number, to
     # avoid float precision loss) -- see known-limitations.md.
     total_collected: str
+    total_goal: Optional[str] = None
+    progress_percent: Optional[int] = None
     # A derived pacing hint for the Group Admin dashboard's purses table --
     # "pending_close" (open, deadline passed), "lagging" (deadline within
     # LAGGING_DEADLINE_DAYS and completion below LAGGING_PERCENT_THRESHOLD),

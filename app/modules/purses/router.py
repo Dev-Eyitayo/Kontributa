@@ -18,6 +18,8 @@ from app.core.exceptions import BusinessRuleError, ForbiddenError
 from app.core.idempotency import IdempotencyStore, fingerprint, get_idempotency_key, get_idempotency_store
 from app.core.pagination import DEFAULT_LIMIT, MAX_LIMIT, Paginated
 from app.core.response import StandardResponse, success_response
+from sqlalchemy import select
+from app.modules.group_admins.models import GroupAdmin
 from app.modules.auth.models import User
 from app.modules.contributions.service import ContributionService, compute_display_status
 from app.modules.group_admins.service import GroupAdminService
@@ -140,18 +142,39 @@ async def create_purse(
 async def list_purses(
     group_id: Optional[UUID] = Query(default=None),
     status: Optional[str] = Query(default=None),
+    search: Optional[str] = Query(default=None),
     limit: int = Query(default=DEFAULT_LIMIT, ge=1, le=MAX_LIMIT),
     offset: int = Query(default=0, ge=0),
     current_user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
-    if current_user.role == "group_admin":
-        if group_id is None:
-            raise BusinessRuleError(
-                "group_id is required -- an admin may manage more than one group", code="group_id_required"
+    user_row = await db.get(User, current_user.id)
+    is_platform_admin = user_row is not None and user_row.is_platform_admin
+
+    is_admin = False
+    admin = None
+    if group_id is not None:
+        if is_platform_admin:
+            admin = await GroupAdminService(db).get_admin_for_group(current_user.id, group_id)
+            is_admin = True
+        else:
+            admin_res = await db.execute(
+                select(GroupAdmin).where(
+                    GroupAdmin.user_id == current_user.id,
+                    GroupAdmin.group_id == group_id,
+                    GroupAdmin.is_active_admin.is_(True),
+                )
             )
-        admin = await GroupAdminService(db).get_admin_for_group(current_user.id, group_id)
-        purses, total = await PurseService(db).list_for_admin(admin, status, limit, offset)
+            admin = admin_res.scalar_one_or_none()
+            if admin is not None:
+                is_admin = True
+    elif current_user.role == "group_admin" or is_platform_admin:
+        raise BusinessRuleError(
+            "group_id is required -- an admin may manage more than one group", code="group_id_required"
+        )
+
+    if is_admin and admin is not None:
+        purses, total = await PurseService(db).list_for_admin(admin, status, search, limit, offset)
         purse_ids = [p.id for p in purses]
         contribution_service = ContributionService(db)
         counts = await contribution_service.counts_for_purses(purse_ids)
@@ -166,6 +189,8 @@ async def list_purses(
                     "paid_count": paid_count,
                     "total_count": total_count,
                     "total_collected": str(collected.get(p.id, 0)),
+                    "total_goal": str(p.amount * total_count),
+                    "progress_percent": round((paid_count / total_count * 100)) if total_count else 0,
                     "pacing_status": _pacing_status(p.status.value, p.deadline, paid_count, total_count, now),
                 }
             )
@@ -198,7 +223,19 @@ async def get_purse(
 ) -> JSONResponse:
     purse = await PurseService(db).get_detail(purse_id)
 
-    if current_user.role == "group_admin":
+    user_row = await db.get(User, current_user.id)
+    is_platform_admin = user_row is not None and user_row.is_platform_admin
+
+    admin_res = await db.execute(
+        select(GroupAdmin).where(
+            GroupAdmin.user_id == current_user.id,
+            GroupAdmin.group_id == purse.group_id,
+            GroupAdmin.is_active_admin.is_(True),
+        )
+    )
+    is_group_admin = admin_res.scalar_one_or_none() is not None or is_platform_admin
+
+    if is_group_admin:
         await GroupAdminService(db).get_admin_for_group(current_user.id, purse.group_id)
         counts = await ContributionService(db).counts_for_purses([purse.id])
         paid_count, total_count = counts.get(purse.id, (0, 0))

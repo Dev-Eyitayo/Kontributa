@@ -168,11 +168,13 @@ class PurseService:
         return contribution
 
     async def list_for_admin(
-        self, admin: GroupAdmin, status: Optional[str] = None, limit: int = 20, offset: int = 0
+        self, admin: GroupAdmin, status: Optional[str] = None, search: Optional[str] = None, limit: int = 20, offset: int = 0
     ) -> tuple[list[Purse], int]:
         stmt = select(Purse).where(Purse.group_id == admin.group_id)
         if status is not None:
             stmt = stmt.where(Purse.status == status)
+        if search:
+            stmt = stmt.where(Purse.title.ilike(f"%{search}%"))
         total = (await self.db.execute(select(func.count()).select_from(stmt.subquery()))).scalar_one()
         result = await self.db.execute(stmt.order_by(Purse.created_at.desc()).limit(limit).offset(offset))
         return list(result.scalars().all()), total

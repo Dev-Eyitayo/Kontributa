@@ -13,10 +13,13 @@ from app.modules.organizations.schemas import (
     AdminCreateGroupRequest,
     AdminCreateOrganizationRequest,
     AdminGroupDetailResponse,
+    AdminGroupFullDetailResponse,
+    AdminGroupListItem,
     AdminGroupResponse,
     AdminMemberListItem,
     AdminMemberResponse,
     AdminOrganizationResponse,
+    AdminSettlementListItem,
     AdminUpdateGroupRequest,
     AdminUpdateMemberRequest,
     AdminUpdateOrganizationRequest,
@@ -32,6 +35,34 @@ admin_router = APIRouter(prefix="/admin", tags=["organizations-admin"])
 
 def get_organization_service(db: AsyncSession = Depends(get_db)) -> OrganizationService:
     return OrganizationService(db)
+
+
+@admin_router.get("/groups", response_model=StandardResponse[Paginated[AdminGroupListItem]])
+async def list_all_groups(
+    limit: int = Query(default=DEFAULT_LIMIT, ge=1, le=MAX_LIMIT),
+    offset: int = Query(default=0, ge=0),
+    _: CurrentUser = Depends(get_current_admin_user),
+    service: OrganizationService = Depends(get_organization_service),
+) -> JSONResponse:
+    items, total = await service.list_all_groups_for_admin(limit, offset)
+    return success_response(
+        {
+            "items": items,
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+        }
+    )
+
+
+@admin_router.get("/groups/{group_id}", response_model=StandardResponse[AdminGroupFullDetailResponse])
+async def get_group_detail(
+    group_id: UUID,
+    _: CurrentUser = Depends(get_current_admin_user),
+    service: OrganizationService = Depends(get_organization_service),
+) -> JSONResponse:
+    detail = await service.get_group_detail_for_admin(group_id)
+    return success_response(detail)
 
 
 @public_router.get("/organizations", response_model=StandardResponse[list[OrganizationOut]])
@@ -154,6 +185,16 @@ async def update_group(
     )
 
 
+@admin_router.delete("/groups/{group_id}")
+async def delete_group(
+    group_id: UUID,
+    current_user: CurrentUser = Depends(get_current_admin_user),
+    service: OrganizationService = Depends(get_organization_service),
+) -> JSONResponse:
+    await service.delete_group(group_id, current_user.id)
+    return success_response({"deleted": True})
+
+
 @admin_router.get("/groups/{group_id}/members", response_model=StandardResponse[Paginated[AdminMemberListItem]])
 async def list_group_members(
     group_id: UUID,
@@ -212,3 +253,22 @@ async def remove_member(
 ) -> JSONResponse:
     await service.remove_member(member_id, current_user.id)
     return success_response({"removed": True})
+
+
+@admin_router.get("/settlements", response_model=StandardResponse[Paginated[AdminSettlementListItem]])
+async def list_settlements_for_admin(
+    limit: int = Query(default=DEFAULT_LIMIT, ge=1, le=MAX_LIMIT),
+    offset: int = Query(default=0, ge=0),
+    _: CurrentUser = Depends(get_current_admin_user),
+    service: OrganizationService = Depends(get_organization_service),
+) -> JSONResponse:
+    items, total = await service.list_settlements_for_admin(limit, offset)
+    return success_response(
+        {
+            "items": items,
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+        }
+    )
+

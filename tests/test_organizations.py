@@ -122,3 +122,16 @@ async def test_patch_organization_can_configure_member_id_format(client, db_sess
     )
     assert resp.status_code == 200
     assert resp.json()["data"]["member_id_format"] == r"^\d{2}/[A-Z]{2}/\d{4}$"
+
+
+async def test_admin_delete_group_success(client, db_session):
+    headers = await _admin_headers(db_session)
+    org, group = await create_org_and_group(db_session)
+
+    resp = await client.delete(f"/admin/groups/{group.id}", headers=headers)
+    assert resp.status_code == 200
+    assert resp.json()["data"]["deleted"] is True
+
+    get_resp = await client.get(f"/admin/groups/{group.id}", headers=headers)
+    assert get_resp.status_code == 404
+

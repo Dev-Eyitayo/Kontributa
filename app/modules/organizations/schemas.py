@@ -98,3 +98,52 @@ class AdminMemberResponse(BaseModel):
 
 class RemoveMemberResponse(BaseModel):
     removed: bool = True
+
+
+class AdminGroupAdminInfo(BaseModel):
+    user_id: UUID
+    first_name: str
+    last_name: str
+    email: str
+
+
+class AdminGroupListItem(BaseModel):
+    id: UUID
+    name: str
+    short_code: str
+    cohort: Optional[str] = None
+    created_at: datetime
+    admin: Optional[AdminGroupAdminInfo] = None
+    members_count: int = 0
+    purses_count: int = 0
+
+
+class AdminGroupFullDetailResponse(BaseModel):
+    id: UUID
+    name: str
+    short_code: str
+    cohort: Optional[str] = None
+    created_at: datetime
+    admin: Optional[AdminGroupAdminInfo] = None
+    members_count: int = 0
+    purses_count: int = 0
+
+
+class AdminSettlementListItem(BaseModel):
+    id: UUID
+    settlement_reference: str
+    sub_account_code: str
+    group_id: Optional[UUID] = None
+    group_name: Optional[str] = None
+    amount: str
+    fee: str
+    settled_amount: str
+    destination_account_name: Optional[str] = None
+    destination_account_number: Optional[str] = None
+    destination_bank_code: Optional[str] = None
+    destination_bank_name: Optional[str] = None
+    status: str
+    settlement_time: Optional[datetime] = None
+    created_at: datetime
+
+

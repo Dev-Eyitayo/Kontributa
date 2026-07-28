@@ -242,3 +242,178 @@ class OrganizationService:
         await self.db.commit()
         await self.db.refresh(member)
         return member
+
+    async def list_all_groups_for_admin(
+        self, limit: int = 20, offset: int = 0
+    ) -> tuple[list[dict], int]:
+        from app.modules.group_admins.models import GroupAdmin
+        from app.modules.purses.models import Purse
+
+        total_stmt = select(func.count()).select_from(Group)
+        total = (await self.db.execute(total_stmt)).scalar_one()
+
+        stmt = select(Group).order_by(Group.created_at.desc()).limit(limit).offset(offset)
+        groups = (await self.db.execute(stmt)).scalars().all()
+        group_ids = [g.id for g in groups]
+
+        admins_map: dict[UUID, dict] = {}
+        members_counts: dict[UUID, int] = {}
+        purses_counts: dict[UUID, int] = {}
+
+        if group_ids:
+            admin_rows = await self.db.execute(
+                select(GroupAdmin, User)
+                .join(User, GroupAdmin.user_id == User.id)
+                .where(GroupAdmin.group_id.in_(group_ids), GroupAdmin.is_active_admin.is_(True))
+            )
+            for ga, user in admin_rows.all():
+                admins_map[ga.group_id] = {
+                    "user_id": str(user.id),
+                    "first_name": user.first_name,
+                    "last_name": user.last_name,
+                    "email": user.email,
+                }
+
+            member_rows = await self.db.execute(
+                select(Member.group_id, func.count())
+                .where(Member.group_id.in_(group_ids), Member.removed_at.is_(None))
+                .group_by(Member.group_id)
+            )
+            members_counts = dict(member_rows.all())
+
+            purse_rows = await self.db.execute(
+                select(Purse.group_id, func.count())
+                .where(Purse.group_id.in_(group_ids))
+                .group_by(Purse.group_id)
+            )
+            purses_counts = dict(purse_rows.all())
+
+        items = []
+        for g in groups:
+            items.append(
+                {
+                    "id": str(g.id),
+                    "name": g.name,
+                    "short_code": g.short_code,
+                    "cohort": g.cohort,
+                    "created_at": g.created_at.isoformat(),
+                    "admin": admins_map.get(g.id),
+                    "members_count": members_counts.get(g.id, 0),
+                    "purses_count": purses_counts.get(g.id, 0),
+                }
+            )
+        return items, total
+
+    async def get_group_detail_for_admin(self, group_id: UUID) -> dict:
+        from app.modules.group_admins.models import GroupAdmin
+        from app.modules.purses.models import Purse
+
+        group = await self.get_group(group_id)
+        admin_row = (
+            await self.db.execute(
+                select(GroupAdmin, User)
+                .join(User, GroupAdmin.user_id == User.id)
+                .where(GroupAdmin.group_id == group_id, GroupAdmin.is_active_admin.is_(True))
+                .limit(1)
+            )
+        ).first()
+
+        admin_data = None
+        if admin_row:
+            ga, user = admin_row
+            admin_data = {
+                "user_id": str(user.id),
+                "first_name": user.first_name,
+                "last_name": user.last_name,
+                "email": user.email,
+            }
+
+        members_count = (
+            await self.db.execute(
+                select(func.count()).select_from(Member).where(Member.group_id == group_id, Member.removed_at.is_(None))
+            )
+        ).scalar_one()
+
+        purses_count = (
+            await self.db.execute(
+                select(func.count()).select_from(Purse).where(Purse.group_id == group_id)
+            )
+        ).scalar_one()
+
+        return {
+            "id": str(group.id),
+            "name": group.name,
+            "short_code": group.short_code,
+            "cohort": group.cohort,
+            "created_at": group.created_at.isoformat(),
+            "admin": admin_data,
+            "members_count": members_count,
+            "purses_count": purses_count,
+        }
+
+    async def list_settlements_for_admin(
+        self, limit: int = 20, offset: int = 0
+    ) -> tuple[list[dict], int]:
+        from app.modules.settlement.models import MonnifySettlementLog
+
+        total_stmt = select(func.count()).select_from(MonnifySettlementLog)
+        total = (await self.db.execute(total_stmt)).scalar_one()
+
+        stmt = (
+            select(MonnifySettlementLog, Group)
+            .outerjoin(Group, MonnifySettlementLog.group_id == Group.id)
+            .order_by(MonnifySettlementLog.created_at.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        rows = (await self.db.execute(stmt)).all()
+
+        items = []
+        for log, group in rows:
+            items.append(
+                {
+                    "id": str(log.id),
+                    "settlement_reference": log.settlement_reference,
+                    "sub_account_code": log.sub_account_code,
+                    "group_id": str(log.group_id) if log.group_id else None,
+                    "group_name": group.name if group else None,
+                    "amount": str(log.amount),
+                    "fee": str(log.fee),
+                    "settled_amount": str(log.settled_amount),
+                    "destination_account_name": log.destination_account_name,
+                    "destination_account_number": log.destination_account_number,
+                    "destination_bank_code": log.destination_bank_code,
+                    "destination_bank_name": log.destination_bank_name,
+                    "status": log.status,
+                    "settlement_time": log.settlement_time.isoformat() if log.settlement_time else None,
+                    "created_at": log.created_at.isoformat(),
+                }
+            )
+        return items, total
+
+    async def delete_group(self, group_id: UUID, actor_id: UUID) -> None:
+        group = await self.db.get(Group, group_id)
+        if group is None:
+            raise NotFoundError("group not found")
+
+        from app.modules.settlement.models import MonnifySettlementLog
+
+        # Unlink group_id references in settlement logs
+        await self.db.execute(update(MonnifySettlementLog).where(MonnifySettlementLog.group_id == group_id).values(group_id=None))
+
+        # Record platform admin audit event for group deletion
+        await self.audit.record_event(
+            entity_type="group",
+            entity_id=group_id,
+            action="group_deleted",
+            actor_type=AuditActorType.PLATFORM_ADMIN,
+            actor_id=actor_id,
+            before_state={"name": group.name, "short_code": group.short_code},
+        )
+
+        # Deleting the group entity triggers DB foreign key CASCADE to child tables automatically
+        await self.db.delete(group)
+        await self.db.commit()
+
+
+

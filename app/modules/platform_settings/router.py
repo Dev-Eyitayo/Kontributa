@@ -19,6 +19,9 @@ def _settings_out(row) -> dict:
     return {
         "custodian_mode_enabled": row.custodian_mode_enabled,
         "platform_fee_percent": str(row.platform_fee_percent),
+        "monnify_enabled": row.monnify_enabled,
+        "paystack_enabled": row.paystack_enabled,
+        "active_payment_provider": row.active_payment_provider,
     }
 
 

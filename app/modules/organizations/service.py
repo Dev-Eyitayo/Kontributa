@@ -340,6 +340,27 @@ class OrganizationService:
             )
         ).scalar_one()
 
+        from app.modules.settlement.models import SettlementAccount
+
+        settlement_acc = (
+            await self.db.execute(
+                select(SettlementAccount).where(SettlementAccount.group_id == group_id)
+            )
+        ).scalar_one_or_none()
+
+        settlement_data = None
+        if settlement_acc:
+            settlement_data = {
+                "id": str(settlement_acc.id),
+                "bank_name": settlement_acc.bank_name,
+                "account_number": settlement_acc.account_number,
+                "account_name_verified": settlement_acc.account_name_verified,
+                "verified_at": settlement_acc.verified_at.isoformat() if settlement_acc.verified_at else None,
+                "settlement_mode": settlement_acc.settlement_mode.value,
+                "direct_sub_account_code": settlement_acc.direct_sub_account_code,
+                "payment_provider": getattr(settlement_acc, "payment_provider", "monnify"),
+            }
+
         return {
             "id": str(group.id),
             "name": group.name,
@@ -349,6 +370,7 @@ class OrganizationService:
             "admin": admin_data,
             "members_count": members_count,
             "purses_count": purses_count,
+            "settlement_account": settlement_data,
         }
 
     async def list_settlements_for_admin(

@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import Boolean, DateTime, Numeric, func
+from sqlalchemy import Boolean, DateTime, Numeric, String, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -27,6 +27,11 @@ class PlatformSettings(Base):
     # sub-account split at invoice-generation time (see
     # ContributionService.generate_invoice) -- 1% by default.
     platform_fee_percent: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False, default=Decimal("1"))
+
+    # Multi-Gateway Direct Mode Toggles
+    monnify_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    paystack_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    active_payment_provider: Mapped[str] = mapped_column(String(20), nullable=False, default="monnify")
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(

@@ -508,37 +508,39 @@ class ContributionService:
         callers that explicitly wire a NotificationService trigger the
         expiry-notice email; this keeps email sending opt-in per call site
         rather than a hidden side effect of calling this method."""
-        if (
-            contribution.status == ContributionStatus.PENDING
-            and contribution.invoice_expires_at is not None
-            and contribution.invoice_expires_at <= datetime.now(timezone.utc)
-        ):
-            await self._write_event(
-                contribution,
-                ContributionStatus.PENDING,
-                ContributionStatus.EXPIRED,
-                ActorType.RECONCILIATION_JOB,
-                None,
-                "invoice validity window lapsed unpaid",
+        if contribution.status == ContributionStatus.PENDING and contribution.invoice_expires_at is not None:
+            expires_at = (
+                contribution.invoice_expires_at.replace(tzinfo=timezone.utc)
+                if contribution.invoice_expires_at.tzinfo is None
+                else contribution.invoice_expires_at
             )
-            contribution.status = ContributionStatus.EXPIRED
-            await self.db.commit()
-            await self.db.refresh(contribution)
-            await self._publish_status_change(realtime, contribution)
+            if expires_at <= datetime.now(timezone.utc):
+                await self._write_event(
+                    contribution,
+                    ContributionStatus.PENDING,
+                    ContributionStatus.EXPIRED,
+                    ActorType.RECONCILIATION_JOB,
+                    None,
+                    "invoice validity window lapsed unpaid",
+                )
+                contribution.status = ContributionStatus.EXPIRED
+                await self.db.commit()
+                await self.db.refresh(contribution)
+                await self._publish_status_change(realtime, contribution)
 
-            if notifications is not None:
-                purse = await self.db.get(Purse, contribution.purse_id)
-                if purse is not None:
-                    await self._notify_owner(
-                        contribution,
-                        notifications,
-                        "contribution_expired.html",
-                        f"Your invoice for {purse.title} expired",
-                        {
-                            "purse_title": purse.title,
-                            "amount": str(contribution.amount_expected - contribution.amount_received),
-                        },
-                    )
+            # if notifications is not None:
+            #     purse = await self.db.get(Purse, contribution.purse_id)
+            #     if purse is not None:
+            #         await self._notify_owner(
+            #             contribution,
+            #             notifications,
+            #             "contribution_expired.html",
+            #             f"Your invoice for {purse.title} expired",
+            #             {
+            #                 "purse_title": purse.title,
+            #                 "amount": str(contribution.amount_expected - contribution.amount_received),
+            #             },
+            #         )
         return contribution
 
     async def generate_invoice(
@@ -553,7 +555,8 @@ class ContributionService:
         contribution = await self.expire_if_needed(contribution, notifications)
 
         now = datetime.now(timezone.utc)
-        if purse.status != PurseStatus.OPEN or purse.deadline <= now:
+        deadline = purse.deadline.replace(tzinfo=timezone.utc) if purse.deadline.tzinfo is None else purse.deadline
+        if purse.status != PurseStatus.OPEN or deadline <= now:
             raise BusinessRuleError(
                 "this purse is no longer open for contributions",
                 code="purse_closed",
@@ -606,11 +609,36 @@ class ContributionService:
         # retroactively changed by a later platform_fee_percent edit.
         income_split_config = None
         platform_fee_percent_applied = None
+        provider = monnify
+
         settlement = (
             await self.db.execute(select(SettlementAccount).where(SettlementAccount.group_id == purse.group_id))
         ).scalar_one_or_none()
+
         if settlement and settlement.settlement_mode == SettlementMode.DIRECT and settlement.direct_sub_account_code:
             settings_row = await (platform_settings or PlatformSettingsService(self.db)).get_or_create()
+            provider_name = getattr(settlement, "payment_provider", "monnify")
+
+            if provider_name == "monnify" and not settings_row.monnify_enabled and settings_row.paystack_enabled:
+                from app.modules.payments.service import get_payment_provider
+                paystack_provider = get_payment_provider("paystack")
+                try:
+                    new_sub_acc = await paystack_provider.create_sub_account(
+                        bank_code=settlement.bank_code,
+                        account_number=settlement.account_number,
+                        email="admin@kontributa.com",
+                        split_percentage=DIRECT_MODE_SPLIT_PERCENTAGE,
+                    )
+                    settlement.direct_sub_account_code = new_sub_acc.sub_account_code
+                    settlement.payment_provider = "paystack"
+                    await self.db.commit()
+                    await self.db.refresh(settlement)
+                    provider_name = "paystack"
+                except Exception as exc:
+                    logger.warning("Failed to auto-migrate settlement account %s to Paystack: %s", settlement.id, exc)
+
+            from app.modules.payments.service import get_payment_provider
+            provider = get_payment_provider(provider_name)
             platform_fee_percent_applied = settings_row.platform_fee_percent
             income_split_config = [
                 {
@@ -621,14 +649,20 @@ class ContributionService:
                 }
             ]
 
-        invoice = await monnify.create_invoice(
+        callback_url = f"{settings.FRONTEND_BASE_URL.rstrip('/')}/my-purses/{purse.id}"
+
+        invoice = await provider.create_invoice(
             invoice_reference=invoice_reference,
             amount=outstanding,
             customer_name=f"{owner_user.first_name} {owner_user.last_name}",
             customer_email=owner_user.email,
             description=purse.title,
             expires_at=expires_at,
-            income_split_config=income_split_config,
+            income_split_config=income_split_config if provider.provider_name == "monnify" else None,
+            sub_account_code=settlement.direct_sub_account_code if settlement and provider.provider_name == "paystack" else None,
+            platform_fee_percent=platform_fee_percent_applied if settlement and provider.provider_name == "paystack" else None,
+            callback_url=callback_url,
+            redirect_url=callback_url,
         )
 
         from_status = contribution.status
@@ -672,7 +706,7 @@ class ContributionService:
         Returns None (no-op) if the contribution isn't pending -- already
         resolved contributions are left alone, which is also what makes
         repeated reconciliation runs safe against double-applying."""
-        if contribution.status != ContributionStatus.PENDING:
+        if contribution.status not in (ContributionStatus.PENDING, ContributionStatus.EXPIRED):
             return None
 
         from_status = contribution.status

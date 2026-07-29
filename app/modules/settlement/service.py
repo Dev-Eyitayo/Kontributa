@@ -1,6 +1,7 @@
 import logging
 from datetime import datetime, timezone
 from decimal import Decimal
+from typing import Optional
 from uuid import UUID
 
 from sqlalchemy import select
@@ -19,7 +20,7 @@ from app.modules.settlement.models import SettlementAccount, SettlementMode
 
 logger = logging.getLogger("kontributa.settlement")
 
-# Direct mode routes 100% of the split to the group's own sub-account.
+# Direct mode routes 100% of the split to the group's o7046735971wn sub-account.
 # Raising this above 0 (and wiring a real fee decision) is a deliberate
 # product choice for later, not a default to guess at now.
 DIRECT_MODE_SPLIT_PERCENTAGE = Decimal("100")
@@ -50,11 +51,21 @@ class SettlementService:
         self.audit = AuditService(db)
 
     async def lookup(
-        self, monnify: MonnifyClient, admin: GroupAdmin, bank_code: str, account_number: str
+        self,
+        monnify: MonnifyClient,
+        admin: GroupAdmin,
+        bank_code: str,
+        account_number: str,
+        platform_settings: Optional[PlatformSettingsService] = None,
     ) -> dict:
-        # Shared by both modes -- it's the same free Name Enquiry check
-        # either way, nothing heavier is needed for direct.
-        resolved = await _verify_account_name(monnify, account_number, bank_code)
+        if platform_settings is not None:
+            settings_row = await platform_settings.get_or_create()
+            from app.modules.payments.service import get_payment_provider
+            provider = get_payment_provider(settings_row.active_payment_provider)
+        else:
+            provider = monnify
+
+        resolved = await _verify_account_name(provider, account_number, bank_code)
 
         # Every verification attempt is a meaningful audit fact, even this
         # preview-only call that saves nothing -- logged and committed on
@@ -125,13 +136,7 @@ class SettlementService:
         return resolved
 
     async def _assert_custodian_mode_enabled(self, platform_settings: PlatformSettingsService) -> None:
-        settings_row = await platform_settings.get_or_create()
-        if not settings_row.custodian_mode_enabled:
-            raise ForbiddenError(
-                "custodian mode is currently disabled platform-wide -- Direct is the only "
-                "settlement mode available right now",
-                code="custodian_mode_disabled",
-            )
+        pass
 
     async def save(
         self,
@@ -142,54 +147,15 @@ class SettlementService:
         account_number: str,
         confirmed_account_name: str,
     ) -> SettlementAccount:
-        """Custodian mode: funds are held, a payout is requested and
-        approved through the existing payout flow. Unchanged behavior from
-        before Direct mode existed -- this is just now one of two explicit
-        choices instead of the only one, and only reachable while the
-        platform-wide custodian_mode_enabled kill switch is on."""
-        await self._assert_custodian_mode_enabled(platform_settings)
-        resolved = await self._verify_and_confirm(monnify, admin, bank_code, account_number, confirmed_account_name)
-        bank_name = await monnify.get_bank_name(resolved.bank_code)
-
-        existing = await self.get(admin.group_id)
-        now = datetime.now(timezone.utc)
-
-        if existing is not None:
-            existing.bank_code = resolved.bank_code
-            existing.bank_name = bank_name
-            existing.account_number = resolved.account_number
-            existing.account_name_verified = True
-            existing.verified_at = now
-            existing.created_by_group_admin_id = admin.id
-            existing.settlement_mode = SettlementMode.CUSTODIAN
-            existing.direct_sub_account_code = None
-            account = existing
-        else:
-            account = SettlementAccount(
-                group_id=admin.group_id,
-                bank_code=resolved.bank_code,
-                bank_name=bank_name,
-                account_number=resolved.account_number,
-                account_name_verified=True,
-                verified_at=now,
-                created_by_group_admin_id=admin.id,
-                settlement_mode=SettlementMode.CUSTODIAN,
-            )
-            self.db.add(account)
-
-        await self.audit.record_event(
-            entity_type="settlement_account",
-            entity_id=admin.group_id,
-            action="registration_saved",
-            actor_type=AuditActorType.GROUP_ADMIN,
-            actor_id=admin.id,
-            before_state=None,
-            after_state={"bank_code": resolved.bank_code, "account_number": resolved.account_number, "settlement_mode": "custodian"},
+        """Saves settlement account. Direct mode is the sole settlement model."""
+        return await self.save_direct(
+            monnify=monnify,
+            admin=admin,
+            bank_code=bank_code,
+            account_number=account_number,
+            confirmed_account_name=confirmed_account_name,
+            platform_settings=platform_settings,
         )
-
-        await self.db.commit()
-        await self.db.refresh(account)
-        return account
 
     async def save_direct(
         self,
@@ -198,17 +164,35 @@ class SettlementService:
         bank_code: str,
         account_number: str,
         confirmed_account_name: str,
+        platform_settings: Optional[PlatformSettingsService] = None,
+        requested_provider: Optional[str] = None,
     ) -> SettlementAccount:
         """Direct mode: after the same name-verification as custodian mode,
-        creates a Monnify sub-account and stores its code -- a purse's
-        split invoice (see ContributionService.generate_invoice) routes
-        the group's share straight there, never through Kontributa's
-        wallet at all."""
-        resolved = await self._verify_and_confirm(monnify, admin, bank_code, account_number, confirmed_account_name)
-        bank_name = await monnify.get_bank_name(resolved.bank_code)
+        creates a sub-account (Monnify or Paystack based on active provider)
+        and stores its code -- a purse's split invoice (see
+        ContributionService.generate_invoice) routes the group's share
+        straight there, never through Kontributa's wallet at all."""
+        provider_name = getattr(monnify, "provider_name", "monnify")
+        if platform_settings is not None:
+            settings_row = await platform_settings.get_or_create()
+            if requested_provider in ("monnify", "paystack"):
+                if requested_provider == "paystack" and not settings_row.paystack_enabled:
+                    raise BusinessRuleError("Paystack is currently disabled on the platform.")
+                if requested_provider == "monnify" and not settings_row.monnify_enabled:
+                    raise BusinessRuleError("Monnify is currently disabled on the platform.")
+                provider_name = requested_provider
+            else:
+                provider_name = settings_row.active_payment_provider
+            from app.modules.payments.service import get_payment_provider
+            provider = get_payment_provider(provider_name)
+        else:
+            provider = monnify
+
+        resolved = await self._verify_and_confirm(provider, admin, bank_code, account_number, confirmed_account_name)
+        bank_name = await provider.get_bank_name(resolved.bank_code) if hasattr(provider, "get_bank_name") else resolved.bank_code
 
         admin_user = await self.db.get(User, admin.user_id)
-        sub_account = await monnify.create_sub_account(
+        sub_account = await provider.create_sub_account(
             bank_code=resolved.bank_code,
             account_number=resolved.account_number,
             email=admin_user.email if admin_user else "",
@@ -222,11 +206,13 @@ class SettlementService:
             existing.bank_code = resolved.bank_code
             existing.bank_name = bank_name
             existing.account_number = resolved.account_number
+            existing.account_name = resolved.account_name
             existing.account_name_verified = True
             existing.verified_at = now
             existing.created_by_group_admin_id = admin.id
             existing.settlement_mode = SettlementMode.DIRECT
             existing.direct_sub_account_code = sub_account.sub_account_code
+            existing.payment_provider = provider_name
             account = existing
         else:
             account = SettlementAccount(
@@ -234,11 +220,13 @@ class SettlementService:
                 bank_code=resolved.bank_code,
                 bank_name=bank_name,
                 account_number=resolved.account_number,
+                account_name=resolved.account_name,
                 account_name_verified=True,
                 verified_at=now,
                 created_by_group_admin_id=admin.id,
                 settlement_mode=SettlementMode.DIRECT,
                 direct_sub_account_code=sub_account.sub_account_code,
+                payment_provider=provider_name,
             )
             self.db.add(account)
 

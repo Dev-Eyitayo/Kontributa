@@ -1,4 +1,6 @@
 import json
+from datetime import datetime, timezone
+from decimal import Decimal
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Request
 from fastapi.responses import JSONResponse
@@ -84,5 +86,69 @@ async def monnify_transfer_webhook(
     if is_new:
         session_factory = async_sessionmaker(bind=db.bind, expire_on_commit=False)
         background_tasks.add_task(process_transfer_webhook_event, event.id, session_factory, sendbyte)
+
+    return success_response({"received": True}, status_code=202)
+
+
+@router.post("/paystack", status_code=202, response_model=StandardResponse[ReceivedResponse])
+async def paystack_webhook(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    sendbyte: SendByteClient = Depends(get_sendbyte_client),
+    realtime: RealtimeService = Depends(get_realtime_service),
+) -> JSONResponse:
+    from app.modules.payments.paystack import PaystackClient
+
+    raw_body = await request.body()
+    signature = request.headers.get("x-paystack-signature", "")
+
+    paystack = PaystackClient()
+    if not paystack.verify_webhook_signature(raw_body, signature):
+        raise AuthError("invalid webhook signature", code="invalid_signature")
+
+    payload = json.loads(raw_body)
+    event_type = payload.get("event")
+    event_data = payload.get("data", {})
+    provider_event_id = event_data.get("reference") or event_data.get("id")
+
+    service = WebhookService(db)
+    event, is_new = await service.store_event(str(provider_event_id), raw_body.decode(), signature_valid=True)
+
+    if is_new:
+        session_factory = async_sessionmaker(bind=db.bind, expire_on_commit=False)
+        if event_type in ("subaccount.settlement", "settlement.success"):
+            subaccount = event_data.get("subaccount", {})
+            sub_code = subaccount.get("subaccount_code") if isinstance(subaccount, dict) else str(subaccount or "")
+            settlement_payload = {
+                "eventType": "SUCCESSFUL_SETTLEMENT",
+                "eventData": {
+                    "settlementReference": str(event_data.get("id") or provider_event_id),
+                    "subAccountCode": sub_code,
+                    "amount": float(Decimal(str(event_data.get("total_amount") or event_data.get("amount", 0))) / Decimal("100")),
+                    "fee": float(Decimal(str(event_data.get("total_fees") or event_data.get("fee", 0))) / Decimal("100")),
+                    "settledAmount": float(Decimal(str(event_data.get("settled_amount") or event_data.get("amount", 0))) / Decimal("100")),
+                    "status": "COMPLETED",
+                    "settlementTime": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f"),
+                },
+            }
+            background_tasks.add_task(process_settlement_webhook_event, event.id, session_factory, settlement_payload)
+        elif event_type == "charge.success":
+            payment_ref = (
+                event_data.get("payment_request_code")
+                or event_data.get("request_code")
+                or event_data.get("reference")
+            )
+            monnify_compatible_payload = {
+                "eventType": "SUCCESSFUL_TRANSACTION",
+                "eventData": {
+                    "paymentReference": str(payment_ref),
+                    "transactionReference": str(event_data.get("reference") or payment_ref),
+                    "amountPaid": float(Decimal(str(event_data.get("amount", 0))) / Decimal("100")),
+                    "paymentStatus": "PAID",
+                    "paidOn": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f"),
+                },
+            }
+            background_tasks.add_task(process_collection_webhook_event, event.id, session_factory, sendbyte, realtime)
 
     return success_response({"received": True}, status_code=202)

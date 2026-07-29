@@ -22,17 +22,19 @@ class SettlementSaveRequest(BaseModel):
     bank_code: str
     account_number: str
     confirmed_account_name: str
+    payment_provider: Optional[Literal["monnify", "paystack"]] = None
 
 
 class SettlementAccountResponse(BaseModel):
     id: UUID
     bank_name: str
     account_number: str
+    account_name: Optional[str] = None
     account_name_verified: bool
     verified_at: Optional[datetime] = None
     settlement_mode: SettlementModeLiteral
-    # Only present in "direct" mode.
     direct_sub_account_code: Optional[str] = None
+    payment_provider: str = "monnify"
 
 
 class SwitchSettlementModeRequest(BaseModel):

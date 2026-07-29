@@ -1,9 +1,11 @@
 import base64
 import hashlib
 import hmac
+import json
+import logging
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from typing import Optional, Union
+from typing import Any, Optional, Union
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -17,6 +19,8 @@ from app.modules.payments.schemas import (
     MonnifyTransactionStatus,
     MonnifyTransferResult,
 )
+
+logger = logging.getLogger("kontributa.payments")
 
 # Confirmed against sandbox: invoice/create's expiryDate is read as
 # Africa/Lagos (WAT, UTC+1, no DST) wall-clock time, not UTC -- an
@@ -110,6 +114,21 @@ class MonnifyClient:
         self, method: str, path: str, json_body: Optional[Union[dict, list]] = None
     ) -> Union[dict, list]:
         token = await self._authenticate()
+        full_url = f"{self._base_url.rstrip('/')}{path}"
+        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+
+        logger.info(
+            "Monnify API Request Details:\n"
+            "  Action (Method): %s\n"
+            "  Complete URL: %s\n"
+            "  Headers: %s\n"
+            "  Request Body: %s",
+            method,
+            full_url,
+            headers,
+            json.dumps(json_body, indent=2) if json_body is not None else "None",
+        )
+
         async with httpx.AsyncClient(base_url=self._base_url, timeout=15) as http:
             resp = await http.request(method, path, json=json_body, headers={"Authorization": f"Bearer {token}"})
 
@@ -127,6 +146,9 @@ class MonnifyClient:
         description: str,
         expires_at: datetime,
         income_split_config: Optional[list[dict]] = None,
+        sub_account_code: Optional[str] = None,
+        platform_fee_percent: Optional[Decimal] = None,
+        **kwargs: Any,
     ) -> MonnifyInvoice:
         body_payload = {
             "invoiceReference": invoice_reference,
@@ -138,13 +160,15 @@ class MonnifyClient:
             "customerName": customer_name,
             "expiryDate": expires_at.astimezone(_MONNIFY_TZ).strftime("%Y-%m-%d %H:%M:%S"),
         }
-        # Direct-mode groups only -- routes their share of this specific
-        # invoice straight to their own Monnify sub-account (see
-        # create_sub_account below) rather than Kontributa's main wallet.
-        # Contribution state transitions (pending/paid/expired/flagged) are
-        # detected identically either way, off our own invoiceReference --
-        # this only changes where the money settles, not how payment
-        # confirmation works.
+        if sub_account_code and not income_split_config:
+            income_split_config = [
+                {
+                    "subAccountCode": sub_account_code,
+                    "splitPercentage": float(DIRECT_MODE_SPLIT_PERCENTAGE),
+                    "feePercentage": 0.0,
+                    "feeBearer": True,
+                }
+            ]
         if income_split_config:
             body_payload["incomeSplitConfig"] = income_split_config
 
@@ -212,20 +236,7 @@ class MonnifyClient:
     async def create_sub_account(
         self, bank_code: str, account_number: str, email: str, split_percentage: Decimal
     ) -> MonnifySubAccount:
-        """Creates a Monnify sub-account for Direct-mode settlement -- a
-        purse's split invoice (see create_invoice's income_split_config)
-        routes the group's share straight here instead of Kontributa's main
-        wallet. The account-name lookup (verify_account_name above) is
-        reused as-is beforehand; this call only runs after that's already
-        confirmed the account holder's name.
-
-        Per Monnify's own documented Create Sub-Account request, the body
-        is a bare JSON array of sub-account specs -- not an object
-        wrapping one -- even for a single sub-account. Sending
-        {"subAccounts": [...]} instead is exactly what produced the
-        "malformed syntax" error from Monnify's API; confirmed fixed with
-        a real Monnify sandbox call returning a genuine subAccountCode.
-        """
+        """Creates a Monnify sub-account for Direct-mode settlement."""
         body = await self._request(
             "POST",
             "/api/v1/sub-accounts",
@@ -262,7 +273,7 @@ class MonnifyClient:
         disbursement OTP requirement -- that OTP step, external to this
         codebase, is a second manual control layered on top of the in-app
         admin approval gate, and is left exactly as Monnify configures it
-        by default. Do not add one here as a "convenience".
+        by default".
         """
         body = await self._request(
             "POST",
@@ -282,6 +293,13 @@ class MonnifyClient:
             reference=body.get("reference", reference),
             status=body.get("status", "PENDING"),
         )
+
+    @property
+    def provider_name(self) -> str:
+        return "monnify"
+
+    def verify_webhook_signature(self, raw_body: bytes, signature: str) -> bool:
+        return self.verify_signature(raw_body, signature, self._secret_key)
 
     @staticmethod
     def verify_signature(raw_body: bytes, signature: str, secret_key: str) -> bool:
@@ -305,3 +323,14 @@ monnify_client = MonnifyClient(
 
 def get_monnify_client() -> MonnifyClient:
     return monnify_client
+
+
+def get_paystack_client():
+    from app.modules.payments.paystack import PaystackClient
+    return PaystackClient()
+
+
+def get_payment_provider(provider_name: str = "monnify"):
+    if provider_name == "paystack":
+        return get_paystack_client()
+    return get_monnify_client()

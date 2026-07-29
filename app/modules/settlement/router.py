@@ -48,10 +48,12 @@ def _account_out(account: SettlementAccount) -> dict:
         "id": str(account.id),
         "bank_name": account.bank_name,
         "account_number": SettlementService.mask_account_number(account.account_number),
+        "account_name": getattr(account, "account_name", None),
         "account_name_verified": account.account_name_verified,
         "verified_at": account.verified_at.isoformat() if account.verified_at else None,
         "settlement_mode": account.settlement_mode.value,
         "direct_sub_account_code": account.direct_sub_account_code,
+        "payment_provider": getattr(account, "payment_provider", "monnify"),
     }
 
 
@@ -63,9 +65,10 @@ async def lookup_settlement_account(
     db: AsyncSession = Depends(get_db),
     monnify: MonnifyClient = Depends(get_monnify_client),
     service: SettlementService = Depends(get_settlement_service),
+    platform_settings: PlatformSettingsService = Depends(get_platform_settings_service),
 ) -> JSONResponse:
     admin = await _assert_admin_of_group(db, current_user, group_id)
-    result = await service.lookup(monnify, admin, payload.bank_code, payload.account_number)
+    result = await service.lookup(monnify, admin, payload.bank_code, payload.account_number, platform_settings=platform_settings)
     return success_response(result)
 
 
@@ -122,10 +125,17 @@ async def save_direct_settlement_account(
     db: AsyncSession = Depends(get_db),
     monnify: MonnifyClient = Depends(get_monnify_client),
     service: SettlementService = Depends(get_settlement_service),
+    platform_settings: PlatformSettingsService = Depends(get_platform_settings_service),
 ) -> JSONResponse:
     admin = await _assert_admin_of_group(db, current_user, group_id)
     account = await service.save_direct(
-        monnify, admin, payload.bank_code, payload.account_number, payload.confirmed_account_name
+        monnify,
+        admin,
+        payload.bank_code,
+        payload.account_number,
+        payload.confirmed_account_name,
+        platform_settings=platform_settings,
+        requested_provider=payload.payment_provider,
     )
     return success_response(_account_out(account), status_code=201)
 

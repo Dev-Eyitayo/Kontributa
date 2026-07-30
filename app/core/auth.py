@@ -281,6 +281,13 @@ def get_password_reset_token_store(redis: Redis = Depends(get_redis)) -> SingleU
     )
 
 
+def get_password_reset_grant_token_store(redis: Redis = Depends(get_redis)) -> SingleUseTokenStore:
+    return SingleUseTokenStore(
+        redis, "reset_grant", timedelta(minutes=15)
+    )
+
+
+
 class UserRole(str, Enum):
     GROUP_ADMIN = "group_admin"
     MEMBER = "member"

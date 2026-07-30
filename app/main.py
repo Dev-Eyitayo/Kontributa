@@ -1,7 +1,9 @@
 import logging
 from contextlib import asynccontextmanager
+from typing import Any
 
 from fastapi import FastAPI, Request
+
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -73,15 +75,26 @@ def _validation_message(errors: list) -> str:
     return "; ".join(parts) if parts else "request validation failed"
 
 
+def _sanitize_error_detail(obj: Any) -> Any:
+    if isinstance(obj, dict):
+        return {k: _sanitize_error_detail(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_sanitize_error_detail(item) for item in obj]
+    if isinstance(obj, Exception):
+        return str(obj)
+    return obj
+
+
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    errors = exc.errors()
+    errors = _sanitize_error_detail(exc.errors())
     return error_response(
         "validation_error",
         _validation_message(errors),
         status_code=422,
         details=errors,
     )
+
 
 
 @app.exception_handler(Exception)

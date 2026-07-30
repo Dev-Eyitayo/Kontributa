@@ -41,6 +41,8 @@ from app.modules.auth.schemas import (
     ResetPasswordResponse,
     VerifyEmailRequest,
     VerifyEmailResponse,
+    VerifyResetCodeRequest,
+    VerifyResetCodeResponse,
 )
 from app.modules.auth.service import AuthService
 from app.modules.notifications.service import NotificationService, SendByteClient, get_sendbyte_client
@@ -249,6 +251,20 @@ async def forgot_password(
 
 
 @router.post(
+    "/verify-reset-code",
+    response_model=StandardResponse[VerifyResetCodeResponse],
+    dependencies=[
+        Depends(rate_limit_by_ip("auth:verify-reset-code", settings.RATE_LIMIT_RESET_PASSWORD_PER_HOUR, 3600))
+    ],
+)
+async def verify_reset_code(
+    payload: VerifyResetCodeRequest, service: AuthService = Depends(get_auth_service)
+) -> JSONResponse:
+    grant_token = await service.verify_reset_code(payload.email, payload.token)
+    return success_response({"reset_grant_token": grant_token, "message": "code verified"})
+
+
+@router.post(
     "/reset-password",
     response_model=StandardResponse[ResetPasswordResponse],
     dependencies=[
@@ -260,3 +276,4 @@ async def reset_password(
 ) -> JSONResponse:
     await service.reset_password(payload)
     return success_response({"message": "password updated"})
+

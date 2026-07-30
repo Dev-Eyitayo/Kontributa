@@ -21,9 +21,35 @@ from app.modules.organizations.models import Group
 from app.modules.purses.models import Purse, PurseStatus
 
 
+STOP_WORDS = {"OF", "AND", "THE", "FOR", "IN", "A", "AN", "GROUP", "CLUB", "ASSOCIATION", "SOCIETY", "PURSE"}
+
+
 def _slugify(name: str) -> str:
-    slug = re.sub(r"[^A-Z0-9]+", "", name.upper())
-    return (slug or "GROUP")[:20]
+    """Generates a clean, short, human-readable short code (acronym/abbreviation)
+    from a group name. E.g., 'Men of Timber and Calibre' -> 'MTC'."""
+    cleaned = re.sub(r"[^A-Z0-9\s]", "", name.upper()).strip()
+    words = [w for w in cleaned.split() if w]
+
+    if not words:
+        return "GROUP"
+
+    significant = [w for w in words if w not in STOP_WORDS]
+    if not significant:
+        significant = words
+
+    if len(significant) >= 3:
+        acronym = "".join(w[0] for w in significant)
+        numbers = "".join(w for w in words if w.isdigit())
+        if numbers:
+            acronym = f"{acronym}-{numbers}"
+        return acronym[:10]
+    elif len(significant) == 2:
+        w1, w2 = significant[0], significant[1]
+        if len(w1) <= 5 and len(w2) <= 5:
+            return f"{w1}-{w2}"[:10]
+        return f"{w1[:4]}-{w2[:4]}"[:10]
+    else:
+        return significant[0][:8]
 
 
 class GroupAdminService:
@@ -79,7 +105,7 @@ class GroupAdminService:
             )
             if existing.scalar_one_or_none() is None:
                 return candidate
-            candidate = f"{base[:16]}-{secrets.token_hex(2).upper()}"
+            candidate = f"{base[:8]}-{secrets.token_hex(2).upper()}"
         raise ForbiddenError("could not generate a unique group code -- try a different name")
 
     async def onboard(self, user_id: UUID, payload: OnboardGroupAdminRequest) -> tuple[GroupAdmin, Group]:

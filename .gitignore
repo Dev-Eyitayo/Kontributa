@@ -60,3 +60,4 @@ docs/
 monnify_subaccount_request.md
 paystack_integration_plan.md
 *.md
+scripts/seed_admin.py

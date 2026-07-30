@@ -64,7 +64,12 @@ app.add_middleware(
 
 @app.exception_handler(AppException)
 async def app_exception_handler(request: Request, exc: AppException):
-    return error_response(exc.code, exc.message, status_code=exc.status_code, details=exc.details)
+    response = error_response(exc.code, exc.message, status_code=exc.status_code, details=exc.details)
+    retry_after = getattr(exc, "retry_after", None)
+    if retry_after is not None:
+        response.headers["Retry-After"] = str(retry_after)
+    return response
+
 
 
 def _validation_message(errors: list) -> str:

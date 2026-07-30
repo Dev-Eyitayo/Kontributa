@@ -118,6 +118,17 @@ class AdminGroupListItem(BaseModel):
     purses_count: int = 0
 
 
+class AdminGroupSettlementDetailResponse(BaseModel):
+    id: UUID
+    bank_name: str
+    account_number: str
+    account_name_verified: bool
+    verified_at: Optional[datetime] = None
+    settlement_mode: str
+    direct_sub_account_code: Optional[str] = None
+    payment_provider: str = "monnify"
+
+
 class AdminGroupFullDetailResponse(BaseModel):
     id: UUID
     name: str
@@ -127,6 +138,7 @@ class AdminGroupFullDetailResponse(BaseModel):
     admin: Optional[AdminGroupAdminInfo] = None
     members_count: int = 0
     purses_count: int = 0
+    settlement_account: Optional[AdminGroupSettlementDetailResponse] = None
 
 
 class AdminSettlementListItem(BaseModel):

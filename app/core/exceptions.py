@@ -33,9 +33,15 @@ class ValidationAppError(AppException):
     code = "validation_error"
 
 
+class RateLimitError(AppException):
+    status_code = 429
+    code = "rate_limited"
+
+
 class AuthError(AppException):
     status_code = 401
     code = "auth_error"
+
 
 
 class ForbiddenError(AppException):

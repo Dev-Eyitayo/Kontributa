@@ -57,3 +57,6 @@ api-spec.md
 monnify-docs.md
 docs/
 .env.prod
+monnify_subaccount_request.md
+paystack_integration_plan.md
+*.md

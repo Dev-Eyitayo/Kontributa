@@ -44,6 +44,7 @@ def get_platform_settings_service(db: AsyncSession = Depends(get_db)) -> Platfor
 
 
 def _contribution_out(c: Contribution, purse: Purse) -> dict:
+    checkout_url = f"https://paystack.com/pay/{c.invoice_id}" if c.invoice_id and c.invoice_id.startswith("PRQ_") else None
     return {
         "id": str(c.id),
         "purse_id": str(c.purse_id),
@@ -57,6 +58,8 @@ def _contribution_out(c: Contribution, purse: Purse) -> dict:
         "amount_expected": str(c.amount_expected),
         "amount_received": str(c.amount_received),
         "account_number": c.account_number,
+        "bank_name": c.bank_name,
+        "checkout_url": checkout_url,
         "invoice_expires_at": c.invoice_expires_at.isoformat() if c.invoice_expires_at else None,
         "paid_at": c.paid_at.isoformat() if c.paid_at else None,
     }
@@ -124,12 +127,14 @@ async def generate_invoice(
         contribution, monnify, owner_user, purse, notifications, platform_settings
     )
 
+    checkout_url = f"https://paystack.com/pay/{contribution.invoice_id}" if contribution.invoice_id and contribution.invoice_id.startswith("PRQ_") else None
     return success_response(
         {
             "account_number": contribution.account_number,
             "bank_name": contribution.bank_name,
             "amount": str(contribution.amount_expected - contribution.amount_received),
             "expires_at": contribution.invoice_expires_at.isoformat(),
+            "checkout_url": checkout_url,
         }
     )
 

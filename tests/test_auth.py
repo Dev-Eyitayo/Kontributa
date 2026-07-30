@@ -174,12 +174,12 @@ async def test_resend_verification_already_verified_is_a_silent_noop(client):
 
 
 async def test_login_success_and_invalid_credentials(client):
-    await _register(client, email="loginme@example.com", password="correcthorse123")
+    await _register(client, email="loginme@example.com", password="P@ssword123")
     verify_token = await find_redis_token("verify_email")
     await client.post("/auth/verify-email", json={"email": "loginme@example.com", "token": verify_token})
 
     ok = await client.post(
-        "/auth/login", json={"email": "loginme@example.com", "password": "correcthorse123"}
+        "/auth/login", json={"email": "loginme@example.com", "password": "P@ssword123"}
     )
     assert ok.status_code == 200
     body = ok.json()
@@ -260,11 +260,11 @@ async def test_unverified_account_cannot_log_in_group_admin_or_member(client):
 
 
 async def test_refresh_token_rotation_and_reuse_detection(client):
-    await _register(client, email="rotator@example.com", password="correcthorse123")
+    await _register(client, email="rotator@example.com", password="P@ssword123")
     verify_token = await find_redis_token("verify_email")
     await client.post("/auth/verify-email", json={"email": "rotator@example.com", "token": verify_token})
     login = await client.post(
-        "/auth/login", json={"email": "rotator@example.com", "password": "correcthorse123"}
+        "/auth/login", json={"email": "rotator@example.com", "password": "P@ssword123"}
     )
     refresh_token_1 = login.json()["data"]["refresh_token"]
 
@@ -297,7 +297,7 @@ async def test_forgot_and_reset_password(client):
 
     token = await find_redis_token("reset_password")
     reset = await client.post(
-        "/auth/reset-password", json={"token": token, "new_password": "newpassword456"}
+        "/auth/reset-password", json={"token": token, "new_password": "NewP@ssword456"}
     )
     assert reset.status_code == 200
 
@@ -307,15 +307,60 @@ async def test_forgot_and_reset_password(client):
     assert old_login.status_code == 401
 
     new_login = await client.post(
-        "/auth/login", json={"email": "resetme@example.com", "password": "newpassword456"}
+        "/auth/login", json={"email": "resetme@example.com", "password": "NewP@ssword456"}
     )
     assert new_login.status_code == 200
+
+
+async def test_two_step_password_reset_flow(client):
+    await _register(client, email="twostep@example.com", password="oldP@ssword123")
+    verify_token = await find_redis_token("verify_email")
+    await client.post("/auth/verify-email", json={"email": "twostep@example.com", "token": verify_token})
+
+    forgot = await client.post("/auth/forgot-password", json={"email": "twostep@example.com"})
+    assert forgot.status_code == 200
+
+    token = await find_redis_token("reset_password")
+    
+    # Step 1: Verify Code
+    verify_resp = await client.post(
+        "/auth/verify-reset-code", json={"email": "twostep@example.com", "token": token}
+    )
+    assert verify_resp.status_code == 200
+    grant_token = verify_resp.json()["data"]["reset_grant_token"]
+    assert grant_token is not None
+
+    # Step 2: Reset Password with Grant Token
+    reset_resp = await client.post(
+        "/auth/reset-password", json={"reset_grant_token": grant_token, "new_password": "NewP@ssword456"}
+    )
+    assert reset_resp.status_code == 200
+
+    new_login = await client.post(
+        "/auth/login", json={"email": "twostep@example.com", "password": "NewP@ssword456"}
+    )
+    assert new_login.status_code == 200
+
+
+
+async def test_forgot_password_cooldown(client):
+    await _register(client, email="cooldown@example.com", password="P@ssword123")
+    
+    # First request succeeds
+    forgot1 = await client.post("/auth/forgot-password", json={"email": "cooldown@example.com"})
+    assert forgot1.status_code == 200
+
+    # Immediate second request returns 429 resend_cooldown
+    forgot2 = await client.post("/auth/forgot-password", json={"email": "cooldown@example.com"})
+    assert forgot2.status_code == 429
+    assert forgot2.json()["error"]["code"] == "resend_cooldown"
 
 
 async def test_forgot_password_unknown_email_still_returns_200(client):
     resp = await client.post("/auth/forgot-password", json={"email": "nobody@example.com"})
     assert resp.status_code == 200
     assert resp.json()["success"] is True
+
 
 
 async def test_logout_revokes_refresh_token_and_blacklists_access_token(client):

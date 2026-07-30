@@ -25,6 +25,7 @@ class SettlementAccount(Base):
     bank_code: Mapped[str] = mapped_column(String(10), nullable=False)
     bank_name: Mapped[str] = mapped_column(String(100), nullable=False)
     account_number: Mapped[str] = mapped_column(String(20), nullable=False)
+    account_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     account_name_verified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     verified_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     created_by_group_admin_id: Mapped[uuid.UUID] = mapped_column(
@@ -38,9 +39,11 @@ class SettlementAccount(Base):
         nullable=False,
         default=SettlementMode.DIRECT,
     )
-    # Only set in "direct" mode -- the Monnify sub-account code that a
+    # Only set in "direct" mode -- the sub-account code that a
     # purse's split invoice routes the group's share to.
     direct_sub_account_code: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    # The provider used to create the sub-account ("monnify" or "paystack")
+    payment_provider: Mapped[str] = mapped_column(String(20), nullable=False, default="monnify")
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(

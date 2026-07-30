@@ -36,17 +36,21 @@ async def run_reconciliation(
 
     Returns (checked_count, updated_count).
     """
-    threshold = datetime.now(timezone.utc) - timedelta(
-        minutes=settings.RECONCILIATION_PENDING_THRESHOLD_MINUTES
-    )
-
-    stmt = select(Contribution).where(
-        Contribution.status == ContributionStatus.PENDING,
-        Contribution.invoice_id.is_not(None),
-        Contribution.updated_at <= threshold,
-    )
     if purse_id is not None:
-        stmt = stmt.where(Contribution.purse_id == purse_id)
+        stmt = select(Contribution).where(
+            Contribution.status.in_([ContributionStatus.PENDING, ContributionStatus.EXPIRED]),
+            Contribution.invoice_id.is_not(None),
+            Contribution.purse_id == purse_id,
+        )
+    else:
+        threshold = datetime.now(timezone.utc) - timedelta(
+            minutes=settings.RECONCILIATION_PENDING_THRESHOLD_MINUTES
+        )
+        stmt = select(Contribution).where(
+            Contribution.status.in_([ContributionStatus.PENDING, ContributionStatus.EXPIRED]),
+            Contribution.invoice_id.is_not(None),
+            Contribution.updated_at <= threshold,
+        )
 
     contributions = (await db.execute(stmt)).scalars().all()
     contribution_service = ContributionService(db)
@@ -56,34 +60,43 @@ async def run_reconciliation(
     checked = 0
     updated = 0
 
+    from app.modules.payments.service import get_payment_provider
+    from app.modules.purses.models import Purse
+    from app.modules.settlement.models import SettlementAccount
+
     for contribution in contributions:
         checked += 1
 
-        contribution = await contribution_service.expire_if_needed(contribution, notifications, realtime)
-        if contribution.status != ContributionStatus.PENDING:
-            updated += 1
-            continue
+        purse = await db.get(Purse, contribution.purse_id)
+        provider = monnify
+        if purse is not None:
+            settlement = (
+                await db.execute(select(SettlementAccount).where(SettlementAccount.group_id == purse.group_id))
+            ).scalar_one_or_none()
+            if settlement is not None:
+                provider = get_payment_provider(getattr(settlement, "payment_provider", "monnify"))
 
         try:
-            tx_status = await monnify.get_transaction_status(contribution.invoice_id)
-        except MonnifyError:
-            logger.warning("reconciliation: Monnify query failed for contribution %s", contribution.id)
+            tx_status = await provider.get_transaction_status(contribution.invoice_id)
+        except Exception as exc:
+            logger.warning("reconciliation: %s query failed for contribution %s: %s", getattr(provider, "provider_name", "provider"), contribution.id, exc)
+            tx_status = None
+
+        if tx_status and tx_status.payment_status == "PAID":
+            result = await contribution_service.apply_payment_confirmation(
+                contribution,
+                tx_status.amount_paid,
+                tx_status.paid_on,
+                ActorType.RECONCILIATION_JOB,
+                "Reconciliation job",
+                notifications,
+                realtime,
+            )
+            if result is not None:
+                updated += 1
             continue
 
-        if tx_status.payment_status != "PAID":
-            continue
-
-        result = await contribution_service.apply_payment_confirmation(
-            contribution,
-            tx_status.amount_paid,
-            tx_status.paid_on,
-            ActorType.RECONCILIATION_JOB,
-            "Reconciliation job",
-            notifications,
-            realtime,
-        )
-        if result is not None:
-            updated += 1
+        contribution = await contribution_service.expire_if_needed(contribution, notifications, realtime)
 
     logger.info("reconciliation run: checked=%d updated=%d", checked, updated)
     return checked, updated

@@ -23,6 +23,8 @@ class ContributionDetailResponse(BaseModel):
     amount_expected: str
     amount_received: str
     account_number: Optional[str] = None
+    bank_name: Optional[str] = None
+    checkout_url: Optional[str] = None
     invoice_expires_at: Optional[datetime] = None
     paid_at: Optional[datetime] = None
 
@@ -32,6 +34,7 @@ class GenerateInvoiceResponse(BaseModel):
     bank_name: str
     amount: str
     expires_at: datetime
+    checkout_url: Optional[str] = None
 
 
 class MarkManualRequest(BaseModel):

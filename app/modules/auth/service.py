@@ -1,8 +1,11 @@
+from typing import Optional
+from datetime import timedelta
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+
 
 from app.core.auth import (
     AccessTokenBlacklist,
@@ -12,7 +15,7 @@ from app.core.auth import (
     create_access_token,
 )
 from app.core.config import settings
-from app.core.exceptions import AuthError, ConflictError, ForbiddenError, NotFoundError
+from app.core.exceptions import AuthError, ConflictError, ForbiddenError, NotFoundError, RateLimitError
 from app.core.security import hash_password, verify_password
 from app.modules.auth.models import User
 from app.modules.group_admins.models import GroupAdmin
@@ -23,6 +26,7 @@ from app.modules.auth.schemas import (
     RefreshTokenRequest,
     RegisterRequest,
     ResetPasswordRequest,
+    VerifyResetCodeRequest,
 )
 from app.modules.notifications.service import NotificationService
 
@@ -37,18 +41,28 @@ class AuthService:
         reset_password_tokens: SingleUseTokenStore,
         notifications: NotificationService,
         activity: SessionActivityService,
+        reset_grant_tokens: Optional[SingleUseTokenStore] = None,
     ):
         self.db = db
         self.refresh_tokens = refresh_tokens
         self.blacklist = blacklist
         self.verify_email_tokens = verify_email_tokens
         self.reset_password_tokens = reset_password_tokens
+        self.reset_grant_tokens = reset_grant_tokens
         self.notifications = notifications
         self.activity = activity
 
     async def _get_by_email(self, email: str) -> User | None:
         result = await self.db.execute(select(User).where(User.email == email))
         return result.scalar_one_or_none()
+
+    async def _get_grant_store(self) -> SingleUseTokenStore:
+        if self.reset_grant_tokens is not None:
+            return self.reset_grant_tokens
+        return SingleUseTokenStore(
+            self.reset_password_tokens._redis, "reset_grant", timedelta(minutes=15)
+        )
+
 
     async def get_me(self, user_id: UUID) -> tuple[User, bool, bool]:
         user = await self.db.get(User, user_id)
@@ -242,7 +256,19 @@ class AuthService:
         await self.blacklist.blacklist(access_jti, access_exp)
 
     async def forgot_password(self, email: str) -> None:
-        user = await self._get_by_email(email)
+        clean_email = email.lower()
+        cooldown_key = f"reset_cooldown:{clean_email}"
+        redis = self.reset_password_tokens._redis
+
+        if await redis.exists(cooldown_key):
+            raise RateLimitError(
+                "Please wait 60 seconds before requesting another reset code",
+                code="resend_cooldown",
+            )
+
+        await redis.set(cooldown_key, "1", ex=60)
+
+        user = await self._get_by_email(clean_email)
         if user is None:
             return
         token = await self.reset_password_tokens.issue(user.id)
@@ -258,8 +284,29 @@ class AuthService:
             },
         )
 
+    async def verify_reset_code(self, email: str, token: str) -> str:
+        user = await self._get_by_email(email.lower())
+        if user is None:
+            raise AuthError("invalid or expired reset token", code="token_invalid")
+
+        user_id = await self.reset_password_tokens.peek(token)
+        if user_id is None or user_id != user.id:
+            raise AuthError("invalid or expired reset token", code="token_invalid")
+
+        await self.reset_password_tokens.consume(token)
+        grant_store = await self._get_grant_store()
+        grant_token = await grant_store.issue(user.id)
+        return grant_token
+
     async def reset_password(self, payload: ResetPasswordRequest) -> None:
-        user_id = await self.reset_password_tokens.consume(payload.token)
+        user_id: UUID | None = None
+        grant_store = await self._get_grant_store()
+
+        if payload.reset_grant_token:
+            user_id = await grant_store.consume(payload.reset_grant_token)
+        elif payload.token:
+            user_id = await self.reset_password_tokens.consume(payload.token)
+
         if user_id is None:
             raise AuthError("invalid or expired reset token", code="token_invalid")
 
@@ -269,3 +316,6 @@ class AuthService:
 
         user.password_hash = hash_password(payload.new_password)
         await self.db.commit()
+
+
+

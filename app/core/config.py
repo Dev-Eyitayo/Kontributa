@@ -73,6 +73,10 @@ class Settings(BaseSettings):
 
     MONNIFY_SOURCE_ACCOUNT_NUMBER: str = ""
 
+    PAYSTACK_BASE_URL: str = "https://api.paystack.co"
+    PAYSTACK_SECRET_KEY: str = ""
+    PAYSTACK_PUBLIC_KEY: str = ""
+
     RECONCILIATION_INTERVAL_MINUTES: int = 20
     RECONCILIATION_PENDING_THRESHOLD_MINUTES: int = 60
 

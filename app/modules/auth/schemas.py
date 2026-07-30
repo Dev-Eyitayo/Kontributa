@@ -115,8 +115,19 @@ class ForgotPasswordResponse(BaseModel):
     message: str = "reset link sent if account exists"
 
 
-class ResetPasswordRequest(BaseModel):
+class VerifyResetCodeRequest(BaseModel):
+    email: EmailStr
     token: str
+
+
+class VerifyResetCodeResponse(BaseModel):
+    reset_grant_token: str
+    message: str = "code verified"
+
+
+class ResetPasswordRequest(BaseModel):
+    token: Optional[str] = None
+    reset_grant_token: Optional[str] = None
     new_password: str = Field(min_length=8)
 
     @field_validator("new_password")
@@ -127,3 +138,4 @@ class ResetPasswordRequest(BaseModel):
 
 class ResetPasswordResponse(BaseModel):
     message: str = "password updated"
+

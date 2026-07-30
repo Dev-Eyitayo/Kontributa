@@ -82,7 +82,7 @@ async def run_reconciliation(
             logger.warning("reconciliation: %s query failed for contribution %s: %s", getattr(provider, "provider_name", "provider"), contribution.id, exc)
             tx_status = None
 
-        if tx_status and tx_status.payment_status == "PAID":
+        if tx_status and tx_status.payment_status in ("PAID", "SUCCESS"):
             result = await contribution_service.apply_payment_confirmation(
                 contribution,
                 tx_status.amount_paid,

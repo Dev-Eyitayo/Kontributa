@@ -61,18 +61,42 @@ class WebhookService:
 
 def _extract_collection_event(raw_payload: str) -> CollectionEventData | None:
     payload = json.loads(raw_payload)
-    if payload.get("eventType") != "SUCCESSFUL_TRANSACTION":
-        return None
 
-    event_data = payload.get("eventData", {})
-    paid_on_raw = event_data.get("paidOn")
-    return CollectionEventData(
-        transaction_reference=event_data.get("transactionReference", ""),
-        payment_reference=event_data.get("paymentReference", ""),
-        amount_paid=Decimal(str(event_data.get("amountPaid", "0"))),
-        payment_status=event_data.get("paymentStatus", ""),
-        paid_on=parse_monnify_datetime(paid_on_raw) if paid_on_raw else None,
-    )
+    # 1. Monnify collection event
+    if payload.get("eventType") == "SUCCESSFUL_TRANSACTION":
+        event_data = payload.get("eventData", {})
+        paid_on_raw = event_data.get("paidOn")
+        return CollectionEventData(
+            transaction_reference=event_data.get("transactionReference", ""),
+            payment_reference=event_data.get("paymentReference", ""),
+            amount_paid=Decimal(str(event_data.get("amountPaid", "0"))),
+            payment_status=event_data.get("paymentStatus", "PAID"),
+            paid_on=parse_monnify_datetime(paid_on_raw) if paid_on_raw else None,
+        )
+
+    # 2. Paystack collection event
+    if payload.get("event") == "charge.success":
+        event_data = payload.get("data", {})
+        payment_ref = (
+            event_data.get("payment_request_code")
+            or event_data.get("request_code")
+            or event_data.get("reference")
+            or ""
+        )
+        tx_ref = str(event_data.get("reference") or payment_ref)
+        paid_at_raw = event_data.get("paid_at") or event_data.get("paidAt")
+        paid_on = datetime.fromisoformat(paid_at_raw.replace("Z", "+00:00")) if paid_at_raw else None
+        amount_paid = Decimal(str(event_data.get("amount", 0))) / Decimal("100")
+
+        return CollectionEventData(
+            transaction_reference=tx_ref,
+            payment_reference=str(payment_ref),
+            amount_paid=amount_paid,
+            payment_status="PAID",
+            paid_on=paid_on,
+        )
+
+    return None
 
 
 def _extract_rejected_payment_event(raw_payload: str) -> RejectedPaymentEventData | None:
@@ -93,21 +117,29 @@ def _extract_rejected_payment_event(raw_payload: str) -> RejectedPaymentEventDat
 
 def _extract_transfer_event(raw_payload: str) -> TransferEventData | None:
     payload = json.loads(raw_payload)
-    event_type = payload.get("eventType", "")
-    if event_type not in ("SUCCESSFUL_DISBURSEMENT", "FAILED_DISBURSEMENT", "REVERSED_DISBURSEMENT"):
-        return None
 
-    event_data = payload.get("eventData", {})
-    # Confirmed against Monnify's own webhook event-type docs: a failed
-    # disbursement's human-readable explanation is in `transactionDescription`
-    # (e.g. "You do not have sufficient balance..."), not a `reason` field --
-    # Monnify's payload never has one. Reading `reason` here would have
-    # silently discarded every real failure explanation in production.
-    return TransferEventData(
-        reference=event_data.get("reference", ""),
-        success=event_type == "SUCCESSFUL_DISBURSEMENT",
-        reason=event_data.get("transactionDescription") if event_type != "SUCCESSFUL_DISBURSEMENT" else None,
-    )
+    # 1. Monnify transfer events
+    event_type = payload.get("eventType", "")
+    if event_type in ("SUCCESSFUL_DISBURSEMENT", "FAILED_DISBURSEMENT", "REVERSED_DISBURSEMENT"):
+        event_data = payload.get("eventData", {})
+        return TransferEventData(
+            reference=event_data.get("reference", ""),
+            success=event_type == "SUCCESSFUL_DISBURSEMENT",
+            reason=event_data.get("transactionDescription") if event_type != "SUCCESSFUL_DISBURSEMENT" else None,
+        )
+
+    # 2. Paystack transfer events
+    paystack_event = payload.get("event", "")
+    if paystack_event in ("transfer.success", "transfer.failed", "transfer.reversed"):
+        event_data = payload.get("data", {})
+        reason = event_data.get("reason") or str(event_data.get("failures") or "") if paystack_event != "transfer.success" else None
+        return TransferEventData(
+            reference=event_data.get("reference", "") or str(event_data.get("transfer_code", "")),
+            success=paystack_event == "transfer.success",
+            reason=reason,
+        )
+
+    return None
 
 
 async def process_transfer_webhook_event(
@@ -173,7 +205,8 @@ async def process_collection_webhook_event(
             await service.mark_processed(event_id, error="not a collection event")
             return
 
-        result = await db.execute(select(Contribution).where(Contribution.invoice_id == data.payment_reference))
+        refs = [r for r in (data.payment_reference, data.transaction_reference) if r]
+        result = await db.execute(select(Contribution).where(Contribution.invoice_id.in_(refs)))
         contribution = result.scalar_one_or_none()
         if contribution is None:
             await service.mark_processed(event_id, error="no contribution matches payment reference")

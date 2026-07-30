@@ -209,8 +209,9 @@ class PaystackClient(DirectPaymentProvider):
         try:
             if payment_reference.startswith("PRQ_"):
                 data = await self._request("GET", f"/paymentrequest/{payment_reference}")
-                paid = data.get("paid", False) or data.get("status") == "paid"
-                payment_status = "PAID" if paid else data.get("status", "pending").upper()
+                raw_status = str(data.get("status", "")).lower()
+                paid = data.get("paid") is True or raw_status in ("paid", "success")
+                payment_status = "PAID" if paid else (raw_status.upper() or "PENDING")
                 amount_kobo = data.get("amount_paid") or (data.get("amount") if paid else 0)
                 amount_paid = Decimal(str(amount_kobo or 0)) / Decimal("100")
                 paid_at_raw = data.get("paid_at") or data.get("updatedAt")

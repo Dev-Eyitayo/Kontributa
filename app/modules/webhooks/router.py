@@ -134,21 +134,8 @@ async def paystack_webhook(
             }
             background_tasks.add_task(process_settlement_webhook_event, event.id, session_factory, settlement_payload)
         elif event_type == "charge.success":
-            payment_ref = (
-                event_data.get("payment_request_code")
-                or event_data.get("request_code")
-                or event_data.get("reference")
-            )
-            monnify_compatible_payload = {
-                "eventType": "SUCCESSFUL_TRANSACTION",
-                "eventData": {
-                    "paymentReference": str(payment_ref),
-                    "transactionReference": str(event_data.get("reference") or payment_ref),
-                    "amountPaid": float(Decimal(str(event_data.get("amount", 0))) / Decimal("100")),
-                    "paymentStatus": "PAID",
-                    "paidOn": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f"),
-                },
-            }
             background_tasks.add_task(process_collection_webhook_event, event.id, session_factory, sendbyte, realtime)
+        elif event_type in ("transfer.success", "transfer.failed", "transfer.reversed"):
+            background_tasks.add_task(process_transfer_webhook_event, event.id, session_factory, sendbyte)
 
     return success_response({"received": True}, status_code=202)

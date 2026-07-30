@@ -231,12 +231,6 @@ class SingleUseTokenStore:
         return f"{self._prefix}:{token}"
 
     async def issue(self, user_id: UUID) -> str:
-        # A 6-digit code only has 1,000,000 possible values -- at any real
-        # volume within a 24h TTL window, two users could plausibly land on
-        # the same code (birthday paradox, not a paranoid edge case here).
-        # `nx=True` means a collision is simply never written over someone
-        # else's pending code; it retries with a fresh code instead of
-        # silently reassigning their code to this user.
         for _ in range(5):
             token = _generate_numeric_code()
             reserved = await self._redis.set(
@@ -406,14 +400,6 @@ async def require_verified_email(
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> CurrentUser:
-    """Login itself now rejects an unverified account outright (see
-    AuthService.login), so in practice a request reaching this dependency
-    already carries a verified user's token -- this stays in place as a
-    defense-in-depth check on purse-creation/payment, since a token issued
-    before this gate existed (or before a future policy change) shouldn't
-    be trusted to imply verification on its own. Composes with a role
-    dependency (e.g. Depends(get_current_group_admin_user)) rather than
-    replacing it -- this only adds the verification gate on top."""
     from app.modules.auth.models import User
 
     row = await db.get(User, user.id)

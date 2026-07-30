@@ -205,18 +205,27 @@ class MonnifyClient:
         resolves a single code from this same call rather than duplicating
         the integration, and the /banks endpoint (app/modules/banks) uses
         this for its Redis-cached response."""
+        if getattr(self, "_cached_banks", None) is not None:
+            return self._cached_banks
+
         banks = await self._request("GET", "/api/v1/banks")
         if isinstance(banks, dict):
             banks = banks.get("banks", [])
-        return [{"bank_code": b.get("code", ""), "bank_name": b.get("name", "")} for b in banks]
+        result = [{"bank_code": b.get("code", ""), "bank_name": b.get("name", "")} for b in banks]
+        self._cached_banks = result
+        return result
 
     async def get_bank_name(self, bank_code: str) -> str:
         """Resolves a bank code to its display name via Monnify's bank
         reference-data list. Falls back to echoing the code if not found."""
-        banks = await self.list_banks()
-        for bank in banks:
-            if bank["bank_code"] == bank_code:
-                return bank["bank_name"]
+        try:
+            banks = await self.list_banks()
+            for bank in banks:
+                if bank.get("bank_code") == bank_code:
+                    return bank.get("bank_name", bank_code)
+        except Exception as exc:
+            logger.warning("Monnify get_bank_name failed for %s: %s", bank_code, exc)
+
         return bank_code
 
     async def verify_account_name(self, account_number: str, bank_code: str) -> MonnifyAccountName:

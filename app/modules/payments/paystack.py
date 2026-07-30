@@ -34,6 +34,7 @@ class PaystackClient(DirectPaymentProvider):
     def __init__(self, base_url: str = "", secret_key: str = ""):
         self._base_url = (base_url or settings.PAYSTACK_BASE_URL).rstrip("/")
         self._secret_key = secret_key or settings.PAYSTACK_SECRET_KEY
+        self._cached_banks: Optional[list[dict]] = None
 
     @property
     def provider_name(self) -> str:
@@ -81,6 +82,9 @@ class PaystackClient(DirectPaymentProvider):
 
     async def list_banks(self) -> list[dict]:
         """Returns list of banks formatted as [{'bank_code': ..., 'bank_name': ...}], deduplicated by bank_code."""
+        if self._cached_banks is not None:
+            return self._cached_banks
+
         data = await self._request("GET", "/bank?country=nigeria")
         seen_codes = set()
         banks = []
@@ -93,7 +97,21 @@ class PaystackClient(DirectPaymentProvider):
                     "bank_code": code,
                     "bank_name": name,
                 })
+
+        self._cached_banks = banks
         return banks
+
+    async def get_bank_name(self, bank_code: str) -> str:
+        """Resolves a bank code to its display name via Paystack's live bank list."""
+        try:
+            banks = await self.list_banks()
+            for bank in banks:
+                if bank.get("bank_code") == bank_code:
+                    return bank.get("bank_name", bank_code)
+        except Exception as exc:
+            logger.warning("Paystack get_bank_name failed for %s: %s", bank_code, exc)
+
+        return bank_code
 
     async def verify_account_name(self, account_number: str, bank_code: str) -> AccountNameResult:
         """Resolves real account holder name via Paystack bank resolve API."""

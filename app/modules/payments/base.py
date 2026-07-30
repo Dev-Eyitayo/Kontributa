@@ -51,6 +51,11 @@ class DirectPaymentProvider(ABC):
         pass
 
     @abstractmethod
+    async def get_bank_name(self, bank_code: str) -> str:
+        """Resolves a bank code to its human-readable display name."""
+        pass
+
+    @abstractmethod
     async def verify_account_name(self, account_number: str, bank_code: str) -> AccountNameResult:
         """Resolves the real account holder name for a bank/account number."""
         pass

@@ -208,7 +208,24 @@ class PaystackClient(DirectPaymentProvider):
         """Queries transaction status by payment reference or Payment Request code via Paystack API."""
         try:
             if payment_reference.startswith("PRQ_"):
-                data = await self._request("GET", f"/paymentrequest/{payment_reference}")
+                data = None
+                # 1. Try GET /paymentrequest/verify/{code}
+                try:
+                    data = await self._request("GET", f"/paymentrequest/verify/{payment_reference}")
+                except Exception as exc:
+                    logger.info("Paystack /paymentrequest/verify failed for %s: %s", payment_reference, exc)
+
+                # 2. Try GET /paymentrequest/{code}
+                if data is None:
+                    try:
+                        data = await self._request("GET", f"/paymentrequest/{payment_reference}")
+                    except Exception as exc:
+                        logger.info("Paystack /paymentrequest failed for %s: %s", payment_reference, exc)
+
+                # 3. Fall back to GET /transaction/verify/{reference}
+                if data is None:
+                    return await self._verify_transaction(payment_reference)
+
                 raw_status = str(data.get("status", "")).lower()
                 paid = data.get("paid") is True or raw_status in ("paid", "success")
                 payment_status = "PAID" if paid else (raw_status.upper() or "PENDING")
@@ -224,22 +241,25 @@ class PaystackClient(DirectPaymentProvider):
                     paid_on=paid_on,
                 )
             else:
-                data = await self._request("GET", f"/transaction/verify/{payment_reference}")
-                status = data.get("status", "")
-                payment_status = "PAID" if status == "success" else status.upper()
-                amount_paid = Decimal(str(data.get("amount", 0))) / Decimal("100")
-                paid_at_raw = data.get("paid_at") or data.get("paidAt")
-                paid_on = datetime.fromisoformat(paid_at_raw.replace("Z", "+00:00")) if paid_at_raw else None
-                return MonnifyTransactionStatus(
-                    transaction_reference=str(data.get("id", payment_reference)),
-                    payment_reference=payment_reference,
-                    payment_status=payment_status,
-                    amount_paid=amount_paid,
-                    paid_on=paid_on,
-                )
+                return await self._verify_transaction(payment_reference)
         except Exception as exc:
             logger.warning("Paystack get_transaction_status failed for %s: %s", payment_reference, exc)
             raise PaystackError(f"Failed to query Paystack transaction status: {exc}") from exc
+
+    async def _verify_transaction(self, payment_reference: str) -> MonnifyTransactionStatus:
+        data = await self._request("GET", f"/transaction/verify/{payment_reference}")
+        status = str(data.get("status", "")).lower()
+        payment_status = "PAID" if status in ("success", "paid") else status.upper()
+        amount_paid = Decimal(str(data.get("amount", 0))) / Decimal("100")
+        paid_at_raw = data.get("paid_at") or data.get("paidAt")
+        paid_on = datetime.fromisoformat(paid_at_raw.replace("Z", "+00:00")) if paid_at_raw else None
+        return MonnifyTransactionStatus(
+            transaction_reference=str(data.get("id", payment_reference)),
+            payment_reference=payment_reference,
+            payment_status=payment_status,
+            amount_paid=amount_paid,
+            paid_on=paid_on,
+        )
 
     def verify_webhook_signature(self, raw_body: bytes, signature: str) -> bool:
         """Verifies x-paystack-signature header using HMAC-SHA512 with PAYSTACK_SECRET_KEY."""

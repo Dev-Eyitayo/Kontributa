@@ -1,6 +1,6 @@
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, Query
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -37,8 +37,9 @@ async def trigger_reconciliation(
     realtime: RealtimeService = Depends(get_realtime_service),
 ) -> JSONResponse:
     purse_id = payload.purse_id if payload else None
+    force = payload.force if (payload and payload.force is not None) else True
     notifications = NotificationService(db, sendbyte)
-    checked, updated = await run_reconciliation(db, monnify, purse_id, notifications, realtime)
+    checked, updated = await run_reconciliation(db, monnify, purse_id, notifications, realtime, force=force)
     return success_response({"checked": checked, "updated": updated})
 
 
@@ -68,6 +69,58 @@ async def list_webhook_events(
             "offset": offset,
         }
     )
+
+
+@router.post("/webhook-events/{event_id}/reprocess", response_model=StandardResponse[dict])
+async def reprocess_webhook_event(
+    event_id: str,
+    background_tasks: BackgroundTasks,
+    _: CurrentUser = Depends(get_current_admin_user),
+    db: AsyncSession = Depends(get_db),
+    sendbyte: SendByteClient = Depends(get_sendbyte_client),
+    realtime: RealtimeService = Depends(get_realtime_service),
+) -> JSONResponse:
+    import json
+    from uuid import UUID
+    from sqlalchemy import select
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+    from app.core.exceptions import NotFoundError
+    from app.modules.webhooks.models import WebhookEvent
+    from app.modules.webhooks.service import (
+        process_collection_webhook_event,
+        process_settlement_webhook_event,
+        process_transfer_webhook_event,
+    )
+
+    event = None
+    try:
+        event = await db.get(WebhookEvent, UUID(event_id))
+    except Exception:
+        pass
+
+    if event is None:
+        result = await db.execute(select(WebhookEvent).where(WebhookEvent.provider_event_id == event_id))
+        event = result.scalar_one_or_none()
+
+    if event is None:
+        raise NotFoundError("webhook event not found", code="webhook_event_not_found")
+
+    event.processed = False
+    event.processing_error = None
+    await db.commit()
+
+    session_factory = async_sessionmaker(bind=db.bind, expire_on_commit=False)
+    payload = json.loads(event.raw_payload)
+    event_type = payload.get("event") or payload.get("eventType")
+
+    if event_type in ("subaccount.settlement", "settlement.success", "SUCCESSFUL_SETTLEMENT", "SETTLEMENT_COMPLETED"):
+        background_tasks.add_task(process_settlement_webhook_event, event.id, session_factory, payload)
+    elif event_type in ("transfer.success", "transfer.failed", "transfer.reversed", "SUCCESSFUL_DISBURSEMENT", "FAILED_DISBURSEMENT", "REVERSED_DISBURSEMENT"):
+        background_tasks.add_task(process_transfer_webhook_event, event.id, session_factory, sendbyte)
+    else:
+        background_tasks.add_task(process_collection_webhook_event, event.id, session_factory, sendbyte, realtime)
+
+    return success_response({"reprocessed": True, "event_id": str(event.id), "provider_event_id": event.provider_event_id})
 
 
 @router.get("/contributions/flagged", response_model=StandardResponse[Paginated[FlaggedContributionItem]])

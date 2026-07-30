@@ -7,6 +7,7 @@ from pydantic import BaseModel
 
 class ReconciliationRunRequest(BaseModel):
     purse_id: Optional[UUID] = None
+    force: Optional[bool] = True
 
 
 class ReconciliationRunResponse(BaseModel):

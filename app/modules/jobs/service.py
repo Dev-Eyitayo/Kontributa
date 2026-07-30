@@ -22,6 +22,7 @@ async def run_reconciliation(
     purse_id: Optional[UUID] = None,
     notifications: Optional[NotificationService] = None,
     realtime: Optional[RealtimeService] = None,
+    force: bool = False,
 ) -> tuple[int, int]:
     """Finds every Contribution still pending past a safe threshold and
     queries Monnify's transaction status directly for each -- covers a
@@ -41,6 +42,11 @@ async def run_reconciliation(
             Contribution.status.in_([ContributionStatus.PENDING, ContributionStatus.EXPIRED]),
             Contribution.invoice_id.is_not(None),
             Contribution.purse_id == purse_id,
+        )
+    elif force:
+        stmt = select(Contribution).where(
+            Contribution.status.in_([ContributionStatus.PENDING, ContributionStatus.EXPIRED]),
+            Contribution.invoice_id.is_not(None),
         )
     else:
         threshold = datetime.now(timezone.utc) - timedelta(

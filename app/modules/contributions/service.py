@@ -195,7 +195,13 @@ class ContributionService:
         )
         rows = (await self.db.execute(stmt)).scalars().all()
         for contribution in rows:
-            contribution.amount_expected = new_amount
+            if contribution.amount_expected != new_amount or contribution.invoice_id is not None:
+                contribution.amount_expected = new_amount
+                contribution.invoice_id = None
+                contribution.account_number = None
+                contribution.bank_name = None
+                contribution.invoice_expires_at = None
+                contribution.platform_fee_percent_applied = None
         if rows:
             await self.db.commit()
 
@@ -779,6 +785,11 @@ class ContributionService:
             note = "rep accepted the received amount as final"
         elif resolution == "request_topup":
             contribution.status = ContributionStatus.PENDING
+            contribution.invoice_id = None
+            contribution.account_number = None
+            contribution.bank_name = None
+            contribution.invoice_expires_at = None
+            contribution.platform_fee_percent_applied = None
             note = "rep requested a top-up for the shortfall"
         elif resolution == "refund":
             raise BusinessRuleError(

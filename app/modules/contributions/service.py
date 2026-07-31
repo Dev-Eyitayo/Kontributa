@@ -609,15 +609,16 @@ class ContributionService:
         # retroactively changed by a later platform_fee_percent edit.
         income_split_config = None
         platform_fee_percent_applied = None
-        provider = monnify
+        settings_row = await (platform_settings or PlatformSettingsService(self.db)).get_or_create()
+        from app.modules.payments.service import get_payment_provider
+        provider = get_payment_provider(settings_row.active_payment_provider)
 
         settlement = (
             await self.db.execute(select(SettlementAccount).where(SettlementAccount.group_id == purse.group_id))
         ).scalar_one_or_none()
 
         if settlement and settlement.settlement_mode == SettlementMode.DIRECT and settlement.direct_sub_account_code:
-            settings_row = await (platform_settings or PlatformSettingsService(self.db)).get_or_create()
-            provider_name = getattr(settlement, "payment_provider", "monnify")
+            provider_name = getattr(settlement, "payment_provider", "paystack")
 
             if provider_name == "monnify" and not settings_row.monnify_enabled and settings_row.paystack_enabled:
                 from app.modules.payments.service import get_payment_provider

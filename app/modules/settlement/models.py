@@ -43,7 +43,7 @@ class SettlementAccount(Base):
     # purse's split invoice routes the group's share to.
     direct_sub_account_code: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     # The provider used to create the sub-account ("monnify" or "paystack")
-    payment_provider: Mapped[str] = mapped_column(String(20), nullable=False, default="monnify")
+    payment_provider: Mapped[str] = mapped_column(String(20), nullable=False, default="paystack")
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(

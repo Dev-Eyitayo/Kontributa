@@ -34,7 +34,7 @@ class SettlementAccountResponse(BaseModel):
     verified_at: Optional[datetime] = None
     settlement_mode: SettlementModeLiteral
     direct_sub_account_code: Optional[str] = None
-    payment_provider: str = "monnify"
+    payment_provider: str = "paystack"
 
 
 class SwitchSettlementModeRequest(BaseModel):

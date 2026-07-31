@@ -30,8 +30,8 @@ class PlatformSettings(Base):
 
     # Multi-Gateway Direct Mode Toggles
     monnify_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
-    paystack_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    active_payment_provider: Mapped[str] = mapped_column(String(20), nullable=False, default="monnify")
+    paystack_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    active_payment_provider: Mapped[str] = mapped_column(String(20), nullable=False, default="paystack")
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(

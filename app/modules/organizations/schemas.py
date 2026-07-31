@@ -126,7 +126,7 @@ class AdminGroupSettlementDetailResponse(BaseModel):
     verified_at: Optional[datetime] = None
     settlement_mode: str
     direct_sub_account_code: Optional[str] = None
-    payment_provider: str = "monnify"
+    payment_provider: str = "paystack"
 
 
 class AdminGroupFullDetailResponse(BaseModel):

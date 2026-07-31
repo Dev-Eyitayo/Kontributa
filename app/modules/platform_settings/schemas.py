@@ -8,8 +8,8 @@ class PlatformSettingsResponse(BaseModel):
     custodian_mode_enabled: bool
     platform_fee_percent: str
     monnify_enabled: bool = True
-    paystack_enabled: bool = False
-    active_payment_provider: str = "monnify"
+    paystack_enabled: bool = True
+    active_payment_provider: str = "paystack"
 
 
 class UpdatePlatformSettingsRequest(BaseModel):

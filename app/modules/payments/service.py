@@ -339,7 +339,7 @@ def get_paystack_client():
     return PaystackClient()
 
 
-def get_payment_provider(provider_name: str = "monnify"):
-    if provider_name == "paystack":
-        return get_paystack_client()
-    return get_monnify_client()
+def get_payment_provider(provider_name: str = "paystack"):
+    if provider_name == "monnify":
+        return get_monnify_client()
+    return get_paystack_client()

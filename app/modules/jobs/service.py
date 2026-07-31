@@ -74,13 +74,13 @@ async def run_reconciliation(
         checked += 1
 
         purse = await db.get(Purse, contribution.purse_id)
-        provider = monnify
+        provider = get_payment_provider("paystack")
         if purse is not None:
             settlement = (
                 await db.execute(select(SettlementAccount).where(SettlementAccount.group_id == purse.group_id))
             ).scalar_one_or_none()
             if settlement is not None:
-                provider = get_payment_provider(getattr(settlement, "payment_provider", "monnify"))
+                provider = get_payment_provider(getattr(settlement, "payment_provider", "paystack"))
 
         try:
             tx_status = await provider.get_transaction_status(contribution.invoice_id)

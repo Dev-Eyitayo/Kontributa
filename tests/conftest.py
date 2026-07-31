@@ -34,7 +34,7 @@ from app.modules.payments.schemas import (
     MonnifyTransferResult,
 )
 from app.modules.payments.service import MonnifyError, get_monnify_client
-from app.modules.notifications.service import SendByteError, get_sendbyte_client
+from app.modules.notifications.service import EmailServiceError, get_email_client, get_sendbyte_client
 from app.modules.realtime.service import RealtimeService, get_realtime_service
 
 # Ensure every module's models are registered on Base.metadata before create_all.
@@ -225,7 +225,7 @@ class FakeMonnifyClient:
         return MonnifyTransferResult(reference=reference, status="PENDING")
 
 
-class FakeSendByteClient:
+class FakeEmailClient:
     """Stands in for the real SendByte API in tests -- no network access."""
 
     def __init__(self):
@@ -234,7 +234,7 @@ class FakeSendByteClient:
 
     async def send(self, to_email: str, to_name: str, subject: str, html: str) -> str:
         if self.should_fail:
-            raise SendByteError("simulated SendByte send failure")
+            raise EmailServiceError("simulated SendByte send failure")
         self.sent.append({"to_email": to_email, "to_name": to_name, "subject": subject, "html": html})
         return f"fake-message-{len(self.sent)}"
 
@@ -271,7 +271,7 @@ async def db_setup():
     fake_redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
 
     fake_monnify = FakeMonnifyClient()
-    fake_sendbyte = FakeSendByteClient()
+    fake_sendbyte = FakeEmailClient()
     fake_realtime = FakeRealtimeService()
 
     _state["engine"] = engine
@@ -279,6 +279,7 @@ async def db_setup():
     _state["redis"] = fake_redis
     _state["monnify"] = fake_monnify
     _state["sendbyte"] = fake_sendbyte
+    _state["email_client"] = fake_sendbyte
     _state["realtime"] = fake_realtime
 
     async def _override_get_db():
@@ -291,7 +292,7 @@ async def db_setup():
     def _override_get_monnify_client():
         return fake_monnify
 
-    def _override_get_sendbyte_client():
+    def _override_get_email_client():
         return fake_sendbyte
 
     def _override_get_realtime_service():
@@ -300,7 +301,8 @@ async def db_setup():
     app.dependency_overrides[get_db] = _override_get_db
     app.dependency_overrides[get_redis] = _override_get_redis
     app.dependency_overrides[get_monnify_client] = _override_get_monnify_client
-    app.dependency_overrides[get_sendbyte_client] = _override_get_sendbyte_client
+    app.dependency_overrides[get_email_client] = _override_get_email_client
+    app.dependency_overrides[get_sendbyte_client] = _override_get_email_client
     app.dependency_overrides[get_realtime_service] = _override_get_realtime_service
 
     yield
@@ -323,6 +325,7 @@ async def db_setup():
     app.dependency_overrides.pop(get_db, None)
     app.dependency_overrides.pop(get_redis, None)
     app.dependency_overrides.pop(get_monnify_client, None)
+    app.dependency_overrides.pop(get_email_client, None)
     app.dependency_overrides.pop(get_sendbyte_client, None)
     app.dependency_overrides.pop(get_realtime_service, None)
 

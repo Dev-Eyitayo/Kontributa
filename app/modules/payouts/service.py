@@ -13,7 +13,7 @@ from app.modules.audit.service import AuditService
 from app.modules.auth.models import User
 from app.modules.contributions.models import Contribution, ContributionStatus
 from app.modules.group_admins.models import GroupAdmin
-from app.modules.notifications.service import NotificationService, SendByteClient
+from app.modules.notifications.service import NotificationService, EmailClient
 from app.modules.organizations.models import Group
 from app.modules.payments.service import MonnifyClient, MonnifyError
 from app.modules.payouts.models import Payout, PayoutActorType, PayoutAllocation, PayoutEvent, PayoutStatus
@@ -459,7 +459,7 @@ async def initiate_transfer_for_payout(
     payout_id: UUID,
     session_factory: async_sessionmaker,
     monnify: MonnifyClient,
-    sendbyte: SendByteClient,
+    email_client: EmailClient,
 ) -> None:
     """Runs as a background task right after POST /payouts/{id}/approve
     responds -- the transfer call is deliberately not inline in the request
@@ -469,7 +469,7 @@ async def initiate_transfer_for_payout(
     (test vs. production), not a hardcoded global."""
     async with session_factory() as db:
         service = PayoutService(db)
-        notifications = NotificationService(db, sendbyte)
+        notifications = NotificationService(db, email_client)
         payout = await db.get(Payout, payout_id)
         if payout is None or payout.status != PayoutStatus.APPROVED:
             return

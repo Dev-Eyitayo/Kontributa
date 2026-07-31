@@ -26,7 +26,7 @@ from app.modules.members.schemas import (
     MyMemberGroupItem,
 )
 from app.modules.members.service import MemberService
-from app.modules.notifications.service import NotificationService, SendByteClient, get_sendbyte_client
+from app.modules.notifications.service import NotificationService, EmailClient, get_email_client
 
 router = APIRouter(prefix="/members", tags=["members"])
 
@@ -34,9 +34,9 @@ router = APIRouter(prefix="/members", tags=["members"])
 def get_member_service(
     db: AsyncSession = Depends(get_db),
     verify_email_tokens: SingleUseTokenStore = Depends(get_email_verification_token_store),
-    sendbyte: SendByteClient = Depends(get_sendbyte_client),
+    email_client: EmailClient = Depends(get_email_client),
 ) -> MemberService:
-    return MemberService(db, verify_email_tokens, NotificationService(db, sendbyte))
+    return MemberService(db, verify_email_tokens, NotificationService(db, email_client))
 
 
 def get_contribution_service(db: AsyncSession = Depends(get_db)) -> ContributionService:

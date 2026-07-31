@@ -65,12 +65,6 @@ _jinja_env.filters["date"] = format_datetime
 
 
 def render_template(template_name: str, context: dict) -> str:
-    # Merged in for every template rather than threaded through each
-    # call site's own context dict -- brand assets and the app's own URL
-    # belong to the shared shell (base.html), not to what triggered any
-    # individual email. FRONTEND_BASE_URL is served from Vercel, whose
-    # /public folder is what actually hosts these two static SVGs (see
-    # Kontributa-Client/public/logo/).
     base = settings.FRONTEND_BASE_URL.rstrip("/")
     branding = {
         "app_url": base,
@@ -81,25 +75,12 @@ def render_template(template_name: str, context: dict) -> str:
     return template.render(**{**branding, **context})
 
 
-class SendByteError(AppException):
+class EmailServiceError(AppException):
     status_code = 502
-    code = "sendbyte_error"
+    code = "email_service_error"
 
 
-class SendByteClient:
-    """
-    Thin wrapper around SendByte's transactional email API (sandbox key
-    first, live key swapped in later purely via env var -- same pattern as
-    MonnifyClient).
-
-    Request/response shape (POST {base_url}/v1/emails, Bearer auth, JSON
-    body with from/to/subject/html, 201 with {id, status: "queued"} on
-    success) confirmed directly against SendByte's own quickstart docs.
-    Key modes (sk_test_/sk_live_) and scopes are a config-only concern --
-    SENDBYTE_API_KEY is the only thing that changes between sandbox and
-    live, never this client's code.
-    """
-
+class EmailClient:
     def __init__(self, base_url: str, api_key: str, from_email: str, from_name: str):
         self._base_url = base_url.rstrip("/")
         self._api_key = api_key
@@ -108,31 +89,43 @@ class SendByteClient:
 
     async def send(self, to_email: str, to_name: str, subject: str, html: str) -> str:
         async with httpx.AsyncClient(base_url=self._base_url, timeout=15) as http:
+            sender = f"{self._from_name} <{self._from_email}>" if self._from_name else self._from_email
+            recipient = f"{to_name} <{to_email}>" if to_name else to_email
             resp = await http.post(
                 "/v1/emails",
                 json={
-                    "from": f"{self._from_name} <{self._from_email}>",
-                    "to": f"{to_name} <{to_email}>" if to_name else to_email,
+                    "from": sender,
+                    "to": recipient,
                     "subject": subject,
                     "html": html,
                 },
-                headers={"Authorization": f"Bearer {self._api_key}"},
+                headers={
+                    "Authorization": f"Bearer {self._api_key}",
+                    "Content-Type": "application/json",
+                },
             )
         if resp.status_code >= 400:
-            raise SendByteError(f"SendByte API error: HTTP {resp.status_code}: {resp.text}")
+            raise EmailServiceError(f"Email API error: HTTP {resp.status_code}: {resp.text}")
         return resp.json().get("id", "")
 
 
-sendbyte_client = SendByteClient(
-    base_url=settings.SENDBYTE_BASE_URL,
-    api_key=settings.SENDBYTE_API_KEY,
-    from_email=settings.SENDBYTE_FROM_EMAIL,
-    from_name=settings.SENDBYTE_FROM_NAME,
+email_client = EmailClient(
+    base_url=settings.EMAIL_BASE_URL,
+    api_key=settings.EMAIL_API_KEY,
+    from_email=settings.EMAIL_FROM_EMAIL,
+    from_name=settings.EMAIL_FROM_NAME,
 )
 
+# Backward-compatible alias
+sendbyte_client = email_client
 
-def get_sendbyte_client() -> SendByteClient:
-    return sendbyte_client
+
+def get_email_client() -> EmailClient:
+    return email_client
+
+
+def get_sendbyte_client() -> EmailClient:
+    return get_email_client()
 
 
 class NotificationService:
@@ -144,7 +137,7 @@ class NotificationService:
     NotificationLog row -- an operational record for debugging delivery,
     not an AuditLog entry."""
 
-    def __init__(self, db: AsyncSession, client: SendByteClient):
+    def __init__(self, db: AsyncSession, client: EmailClient):
         self.db = db
         self.client = client
 
@@ -185,7 +178,7 @@ class NotificationService:
 
 
 async def send_purse_reminders(
-    purse_id: UUID, session_factory: async_sessionmaker, sendbyte: SendByteClient
+    purse_id: UUID, session_factory: async_sessionmaker, email_client: EmailClient
 ) -> None:
     """Runs as a background task after POST /purses/{id}/remind responds --
     a purse can have many still-pending members, so the batch send happens
@@ -193,7 +186,7 @@ async def send_purse_reminders(
     The weekly-cooldown gate and kill switch are already enforced by the
     router before this is even scheduled; this only sends."""
     async with session_factory() as db:
-        notifications = NotificationService(db, sendbyte)
+        notifications = NotificationService(db, email_client)
         purse = await db.get(Purse, purse_id)
         if purse is None:
             return

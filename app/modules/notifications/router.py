@@ -16,7 +16,7 @@ from app.core.redis import get_redis
 from app.core.response import StandardResponse, success_response
 from app.modules.group_admins.service import GroupAdminService
 from app.modules.notifications.schemas import RemindPurseResponse
-from app.modules.notifications.service import SendByteClient, get_sendbyte_client, send_purse_reminders
+from app.modules.notifications.service import EmailClient, get_email_client, send_purse_reminders
 from app.modules.purses.models import Purse
 
 router = APIRouter(prefix="/purses", tags=["notifications"])
@@ -29,7 +29,7 @@ async def remind_purse(
     current_user: CurrentUser = Depends(get_current_group_admin_user),
     db: AsyncSession = Depends(get_db),
     redis: Redis = Depends(get_redis),
-    sendbyte: SendByteClient = Depends(get_sendbyte_client),
+    email_client: EmailClient = Depends(get_email_client),
 ) -> JSONResponse:
     # Row lock so two near-simultaneous requests for the same purse can't
     # both read a stale last_reminder_sent_at and both slip past the
@@ -42,7 +42,7 @@ async def remind_purse(
     admin = await GroupAdminService(db).get_admin_for_group(current_user.id, purse.group_id)
 
     # Lightweight per-admin throttle against rapid retries/abuse -- the
-    # substantive gate against exhausting the SendByte quota is the
+    # substantive gate against exhausting the email provider quota is the
     # per-purse weekly cooldown below, this just protects against a
     # burst of clicks/requests before that cooldown check even runs.
     await check_rate_limit(
@@ -65,6 +65,6 @@ async def remind_purse(
     await db.commit()
 
     session_factory = async_sessionmaker(bind=db.bind, expire_on_commit=False)
-    background_tasks.add_task(send_purse_reminders, purse_id, session_factory, sendbyte)
+    background_tasks.add_task(send_purse_reminders, purse_id, session_factory, email_client)
 
     return success_response({"purse_id": str(purse_id), "status": "reminders_queued"})

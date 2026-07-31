@@ -45,7 +45,7 @@ from app.modules.auth.schemas import (
     VerifyResetCodeResponse,
 )
 from app.modules.auth.service import AuthService
-from app.modules.notifications.service import NotificationService, SendByteClient, get_sendbyte_client
+from app.modules.notifications.service import NotificationService, EmailClient, get_email_client
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -56,7 +56,7 @@ def get_auth_service(
     blacklist: AccessTokenBlacklist = Depends(get_access_token_blacklist),
     verify_email_tokens: SingleUseTokenStore = Depends(get_email_verification_token_store),
     reset_password_tokens: SingleUseTokenStore = Depends(get_password_reset_token_store),
-    sendbyte: SendByteClient = Depends(get_sendbyte_client),
+    email_client: EmailClient = Depends(get_email_client),
     activity: SessionActivityService = Depends(get_session_activity_service),
 ) -> AuthService:
     return AuthService(
@@ -65,7 +65,7 @@ def get_auth_service(
         blacklist,
         verify_email_tokens,
         reset_password_tokens,
-        NotificationService(db, sendbyte),
+        NotificationService(db, email_client),
         activity,
     )
 

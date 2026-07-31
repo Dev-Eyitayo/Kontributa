@@ -5,7 +5,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from app.core.config import settings
 from app.core.db import AsyncSessionLocal
 from app.modules.jobs.service import run_reconciliation
-from app.modules.notifications.service import NotificationService, sendbyte_client
+from app.modules.notifications.service import NotificationService, email_client
 from app.modules.payments.service import monnify_client
 from app.modules.realtime.service import realtime_service
 
@@ -16,7 +16,7 @@ scheduler = AsyncIOScheduler()
 
 async def _scheduled_reconciliation() -> None:
     async with AsyncSessionLocal() as db:
-        notifications = NotificationService(db, sendbyte_client)
+        notifications = NotificationService(db, email_client)
         await run_reconciliation(db, monnify_client, notifications=notifications, realtime=realtime_service)
 
 

@@ -16,7 +16,7 @@ from app.modules.admin.schemas import (
 )
 from app.modules.admin.service import AdminService
 from app.modules.jobs.service import run_reconciliation
-from app.modules.notifications.service import NotificationService, SendByteClient, get_sendbyte_client
+from app.modules.notifications.service import NotificationService, EmailClient, get_email_client
 from app.modules.payments.service import MonnifyClient, get_monnify_client
 from app.modules.realtime.service import RealtimeService, get_realtime_service
 
@@ -33,12 +33,12 @@ async def trigger_reconciliation(
     _: CurrentUser = Depends(get_current_admin_user),
     db: AsyncSession = Depends(get_db),
     monnify: MonnifyClient = Depends(get_monnify_client),
-    sendbyte: SendByteClient = Depends(get_sendbyte_client),
+    email_client: EmailClient = Depends(get_email_client),
     realtime: RealtimeService = Depends(get_realtime_service),
 ) -> JSONResponse:
     purse_id = payload.purse_id if payload else None
     force = payload.force if (payload and payload.force is not None) else True
-    notifications = NotificationService(db, sendbyte)
+    notifications = NotificationService(db, email_client)
     checked, updated = await run_reconciliation(db, monnify, purse_id, notifications, realtime, force=force)
     return success_response({"checked": checked, "updated": updated})
 
@@ -77,7 +77,7 @@ async def reprocess_webhook_event(
     background_tasks: BackgroundTasks,
     _: CurrentUser = Depends(get_current_admin_user),
     db: AsyncSession = Depends(get_db),
-    sendbyte: SendByteClient = Depends(get_sendbyte_client),
+    email_client: EmailClient = Depends(get_email_client),
     realtime: RealtimeService = Depends(get_realtime_service),
 ) -> JSONResponse:
     import json
@@ -116,9 +116,9 @@ async def reprocess_webhook_event(
     if event_type in ("subaccount.settlement", "settlement.success", "SUCCESSFUL_SETTLEMENT", "SETTLEMENT_COMPLETED"):
         background_tasks.add_task(process_settlement_webhook_event, event.id, session_factory, payload)
     elif event_type in ("transfer.success", "transfer.failed", "transfer.reversed", "SUCCESSFUL_DISBURSEMENT", "FAILED_DISBURSEMENT", "REVERSED_DISBURSEMENT"):
-        background_tasks.add_task(process_transfer_webhook_event, event.id, session_factory, sendbyte)
+        background_tasks.add_task(process_transfer_webhook_event, event.id, session_factory, email_client)
     else:
-        background_tasks.add_task(process_collection_webhook_event, event.id, session_factory, sendbyte, realtime)
+        background_tasks.add_task(process_collection_webhook_event, event.id, session_factory, email_client, realtime)
 
     return success_response({"reprocessed": True, "event_id": str(event.id), "provider_event_id": event.provider_event_id})
 

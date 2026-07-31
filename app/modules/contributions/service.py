@@ -21,7 +21,10 @@ from app.modules.payments.service import MonnifyClient
 from app.modules.platform_settings.service import PlatformSettingsService
 from app.modules.purses.models import EnrollMode, Purse, PurseStatus
 from app.modules.realtime.service import RealtimeService, contribution_channel_name
+import logging
 from app.modules.settlement.models import SettlementAccount, SettlementMode
+
+logger = logging.getLogger("kontributa.contributions")
 
 
 @dataclass
@@ -627,8 +630,8 @@ class ContributionService:
                     new_sub_acc = await paystack_provider.create_sub_account(
                         bank_code=settlement.bank_code,
                         account_number=settlement.account_number,
-                        email="admin@kontributa.com",
-                        split_percentage=DIRECT_MODE_SPLIT_PERCENTAGE,
+                        email=owner_user.email,
+                        split_percentage=Decimal("100") - settings_row.platform_fee_percent,
                     )
                     settlement.direct_sub_account_code = new_sub_acc.sub_account_code
                     settlement.payment_provider = "paystack"
@@ -650,7 +653,7 @@ class ContributionService:
                 }
             ]
 
-        callback_url = f"{settings.FRONTEND_BASE_URL.rstrip('/')}/my-purses/{purse.id}"
+        callback_url = f"{settings.FRONTEND_BASE_URL.rstrip('/')}/my-contributions/{contribution.id}"
 
         invoice = await provider.create_invoice(
             invoice_reference=invoice_reference,

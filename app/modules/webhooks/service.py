@@ -81,6 +81,41 @@ def _extract_collection_event(raw_payload: str) -> CollectionEventData | None:
         event_data = payload.get("data", {})
         metadata = event_data.get("metadata") or {}
 
+        # Log Paystack split percentage & subaccount details
+        subaccount_info = event_data.get("subaccount") or {}
+        split_info = event_data.get("split") or {}
+        fees_split = event_data.get("fees_split") or {}
+        
+        split_share = (
+            subaccount_info.get("percentage_charge")
+            or subaccount_info.get("share")
+            or (fees_split.get("params", {}).get("percentage_charge") if isinstance(fees_split, dict) else None)
+            or (
+                split_info.get("formula", {}).get("subaccounts", [{}])[0].get("share")
+                if isinstance(split_info, dict) and isinstance(split_info.get("formula"), dict)
+                else None
+            )
+        )
+        subaccount_code = subaccount_info.get("subaccount_code") or subaccount_info.get("subaccount")
+        total_amount = event_data.get("amount", 0)
+        paystack_fee = event_data.get("fees", 0)
+
+        # Paystack fees_split dictionary holds 'integration' (subaccount share) and 'paystack'
+        subaccount_amount = (
+            subaccount_info.get("amount")
+            or (fees_split.get("integration") if isinstance(fees_split, dict) else None)
+        )
+
+        logger.info(
+            "Paystack charge.success received: ref=%s, total_amount=%s kobo, subaccount=%s, split_share=%s%%, subaccount_payout=%s kobo (Paystack Fee: %s kobo)",
+            event_data.get("reference"),
+            total_amount,
+            subaccount_code,
+            split_share,
+            subaccount_amount,
+            paystack_fee,
+        )
+
         # 2a. Check explicit metadata invoice_id or referrer URL (e.g. https://paystack.shop/pay/PRQ_wte6pqhc8nbh679)
         prq_code = None
         if isinstance(metadata, dict) and metadata.get("invoice_id"):
@@ -302,30 +337,37 @@ async def process_settlement_webhook_event(
             return
 
         try:
-            event_data = payload.get("eventData", {})
-            settlement_ref = (
-                event_data.get("settlementReference")
-                or event_data.get("reference")
-                or str(event_id)
-            )
-            sub_account_code = event_data.get("subAccountCode", "")
-
-            # Look up matching settlement account to find group_id
-            group_id = None
-            if sub_account_code:
-                result = await db.execute(
-                    select(SettlementAccount.group_id).where(
-                        SettlementAccount.direct_sub_account_code == sub_account_code
-                    )
+            if payload.get("event") == "settlement.create":
+                data = payload.get("data", {})
+                settlement_ref = f"paystack-{data.get('id', str(event_id))}"
+                sub_account = data.get("subaccount", {})
+                sub_account_code = sub_account.get("subaccount_code", "") if isinstance(sub_account, dict) else ""
+                amount = float(data.get("amount") or 0.0) / 100.0
+                fee = 0.0
+                settled_amount = amount
+                settlement_time_str = data.get("settlement_date")
+                settlement_time = parse_monnify_datetime(settlement_time_str) if settlement_time_str else None
+                dest_name = None
+                dest_number = None
+                dest_bank_code = None
+                dest_bank_name = None
+            else:
+                event_data = payload.get("eventData", {})
+                settlement_ref = (
+                    event_data.get("settlementReference")
+                    or event_data.get("reference")
+                    or str(event_id)
                 )
-                group_id = result.scalar_one_or_none()
-
-            amount = float(event_data.get("amount") or 0.0)
-            fee = float(event_data.get("fee") or 0.0)
-            settled_amount = float(event_data.get("settledAmount") or (amount - fee))
-
-            settlement_time_str = event_data.get("settlementTime") or event_data.get("completedOn")
-            settlement_time = parse_monnify_datetime(settlement_time_str) if settlement_time_str else None
+                sub_account_code = event_data.get("subAccountCode", "")
+                amount = float(event_data.get("amount") or 0.0)
+                fee = float(event_data.get("fee") or 0.0)
+                settled_amount = float(event_data.get("settledAmount") or (amount - fee))
+                settlement_time_str = event_data.get("settlementTime") or event_data.get("completedOn")
+                settlement_time = parse_monnify_datetime(settlement_time_str) if settlement_time_str else None
+                dest_name = event_data.get("destinationAccountName")
+                dest_number = event_data.get("destinationAccountNumber")
+                dest_bank_code = event_data.get("destinationBankCode")
+                dest_bank_name = event_data.get("destinationBankName")
 
             log_entry = MonnifySettlementLog(
                 settlement_reference=settlement_ref,
@@ -334,10 +376,10 @@ async def process_settlement_webhook_event(
                 amount=amount,
                 fee=fee,
                 settled_amount=settled_amount,
-                destination_account_name=event_data.get("destinationAccountName"),
-                destination_account_number=event_data.get("destinationAccountNumber"),
-                destination_bank_code=event_data.get("destinationBankCode"),
-                destination_bank_name=event_data.get("destinationBankName"),
+                destination_account_name=dest_name,
+                destination_account_number=dest_number,
+                destination_bank_code=dest_bank_code,
+                destination_bank_name=dest_bank_name,
                 status=event_data.get("status", "COMPLETED"),
                 settlement_time=settlement_time,
                 raw_payload=json.dumps(payload),

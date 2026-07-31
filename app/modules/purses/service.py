@@ -51,6 +51,17 @@ class PurseService:
         if group is None:
             raise NotFoundError("group not found")
 
+        from app.modules.settlement.models import SettlementAccount
+        settlement = (
+            await self.db.execute(select(SettlementAccount).where(SettlementAccount.group_id == admin.group_id))
+        ).scalar_one_or_none()
+
+        if settlement is None or not settlement.account_number or not settlement.bank_code:
+            raise BusinessRuleError(
+                "Please set a settlement account before creating a contribution purse.",
+                code="settlement_account_required",
+            )
+
         purse = Purse(
             group_id=admin.group_id,
             # Always the group's own cohort, set at creation time -- never

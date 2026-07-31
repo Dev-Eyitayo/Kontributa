@@ -127,7 +127,20 @@ async def generate_invoice(
         contribution, monnify, owner_user, purse, notifications, platform_settings
     )
 
-    checkout_url = f"https://paystack.com/pay/{contribution.invoice_id}" if contribution.invoice_id and contribution.invoice_id.startswith("PRQ_") else None
+    is_paystack = bool(contribution.bank_name and "paystack" in contribution.bank_name.lower())
+    if is_paystack:
+        if contribution.invoice_id and contribution.invoice_id.startswith("PRQ_"):
+            checkout_url = f"https://paystack.com/pay/{contribution.invoice_id}"
+        elif contribution.account_number:
+            checkout_url = (
+                contribution.account_number
+                if contribution.account_number.startswith("http")
+                else f"https://checkout.paystack.com/{contribution.account_number}"
+            )
+        else:
+            checkout_url = None
+    else:
+        checkout_url = None
     return success_response(
         {
             "account_number": contribution.account_number,

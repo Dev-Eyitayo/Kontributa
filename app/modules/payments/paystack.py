@@ -127,14 +127,24 @@ class PaystackClient(DirectPaymentProvider):
         )
 
     async def create_sub_account(
-        self, bank_code: str, account_number: str, email: str, split_percentage: Decimal
+        self,
+        bank_code: str,
+        account_number: str,
+        email: str,
+        split_percentage: Decimal,
+        business_name: Optional[str] = None,
     ) -> SubAccountResult:
-        """Creates a Paystack subaccount for Direct Mode revenue split."""
+        """Creates a Paystack subaccount for Direct Mode revenue split.
+        Note: Paystack's percentage_charge is the percentage kept by the MAIN merchant account (the platform fee, e.g. 1.0%).
+        """
+        # Convert subaccount share percentage (e.g. 99.0%) to Paystack platform fee percentage_charge (e.g. 1.0%)
+        platform_fee_charge = Decimal("100") - split_percentage if split_percentage > Decimal("50") else split_percentage
+
         payload = {
-            "business_name": email or "Kontributa Direct Group",
+            "business_name": business_name or email or "Kontributa Direct Group",
             "settlement_bank": bank_code,
             "account_number": account_number,
-            "percentage_charge": float(split_percentage),
+            "percentage_charge": float(platform_fee_charge),
             "primary_contact_email": email or "support@kontributa.app",
         }
         data = await self._request("POST", "/subaccount", json_body=payload)
@@ -171,40 +181,55 @@ class PaystackClient(DirectPaymentProvider):
         platform_fee_percent: Optional[Decimal] = None,
         **kwargs: Any,
     ) -> InvoiceResult:
-        """Creates a Paystack Payment Request (Invoice) with split payment to subaccount."""
-        customer_code = await self._get_or_create_customer(customer_email, customer_name)
+        """Initializes a Paystack Transaction with split payment to subaccount."""
         amount_kobo = int(amount * 100)
-        payload = {
-            "customer": customer_code,
-            "amount": amount_kobo,
-            "description": description or f"Contribution {invoice_reference}",
-            "due_date": expires_at.strftime("%Y-%m-%d"),
-            "metadata": {
-                "invoice_id": invoice_reference,
-            },
-        }
-        if sub_account_code:
-            payload["subaccount"] = sub_account_code
-
         redirect_url = kwargs.get("redirect_url") or kwargs.get("callback_url")
         if not redirect_url and settings.FRONTEND_BASE_URL:
             redirect_url = f"{settings.FRONTEND_BASE_URL.rstrip('/')}/my-purses"
-        if redirect_url:
-            payload["redirect_url"] = redirect_url
 
-        data = await self._request("POST", "/paymentrequest", json_body=payload)
-        
-        # Extract virtual account / offline payment details if present, or invoice code
-        account_number = data.get("offline_reference", data.get("request_code", invoice_reference))
-        
+        payload = {
+            "email": customer_email,
+            "amount": amount_kobo,
+            "reference": invoice_reference,
+            "callback_url": redirect_url,
+            "metadata": {
+                "invoice_id": invoice_reference,
+                "customer_name": customer_name,
+                "description": description or f"Contribution {invoice_reference}",
+                "expires_at": expires_at.isoformat(),
+                "custom_fields": [
+                    {
+                        "display_name": "Customer Name",
+                        "variable_name": "customer_name",
+                        "value": customer_name,
+                    },
+                    {
+                        "display_name": "Description",
+                        "variable_name": "description",
+                        "value": description or f"Contribution {invoice_reference}",
+                    },
+                ],
+            },
+        }
+
+        if sub_account_code:
+            payload["subaccount"] = sub_account_code
+
+        data = await self._request("POST", "/transaction/initialize", json_body=payload)
+
+        authorization_url = data.get("authorization_url", "")
+        access_code = data.get("access_code", "")
+        reference = data.get("reference", invoice_reference)
+
         return InvoiceResult(
-            invoice_reference=data.get("request_code", invoice_reference),
-            account_number=str(account_number),
+            invoice_reference=reference,
+            account_number=access_code or reference[:20],
             bank_name="Paystack Checkout / Dynamic Transfer",
             account_name=customer_name,
             amount=amount,
             expires_at=expires_at,
             payment_provider="paystack",
+            checkout_url=authorization_url,
         )
 
     async def get_transaction_status(self, payment_reference: str) -> MonnifyTransactionStatus:

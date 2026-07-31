@@ -173,20 +173,21 @@ class SettlementService:
         ContributionService.generate_invoice) routes the group's share
         straight there, never through Kontributa's wallet at all."""
         provider_name = getattr(monnify, "provider_name", "monnify")
-        if platform_settings is not None:
-            settings_row = await platform_settings.get_or_create()
-            if requested_provider in ("monnify", "paystack"):
-                if requested_provider == "paystack" and not settings_row.paystack_enabled:
-                    raise BusinessRuleError("Paystack is currently disabled on the platform.")
-                if requested_provider == "monnify" and not settings_row.monnify_enabled:
-                    raise BusinessRuleError("Monnify is currently disabled on the platform.")
-                provider_name = requested_provider
-            else:
-                provider_name = settings_row.active_payment_provider
-            from app.modules.payments.service import get_payment_provider
-            provider = get_payment_provider(provider_name)
+        from app.modules.platform_settings.service import PlatformSettingsService
+        settings_service = platform_settings or PlatformSettingsService(self.db)
+        settings_row = await settings_service.get_or_create()
+        platform_fee_percent = settings_row.platform_fee_percent
+
+        if requested_provider in ("monnify", "paystack"):
+            if requested_provider == "paystack" and not settings_row.paystack_enabled:
+                raise BusinessRuleError("Paystack is currently disabled on the platform.")
+            if requested_provider == "monnify" and not settings_row.monnify_enabled:
+                raise BusinessRuleError("Monnify is currently disabled on the platform.")
+            provider_name = requested_provider
         else:
-            provider = monnify
+            provider_name = settings_row.active_payment_provider
+        from app.modules.payments.service import get_payment_provider
+        provider = get_payment_provider(provider_name)
 
         resolved = await self._verify_and_confirm(provider, admin, bank_code, account_number, confirmed_account_name)
         bank_name = await provider.get_bank_name(resolved.bank_code) if hasattr(provider, "get_bank_name") else resolved.bank_code
@@ -196,7 +197,7 @@ class SettlementService:
             bank_code=resolved.bank_code,
             account_number=resolved.account_number,
             email=admin_user.email if admin_user else "",
-            split_percentage=DIRECT_MODE_SPLIT_PERCENTAGE,
+            split_percentage=Decimal("100") - platform_fee_percent,
         )
 
         existing = await self.get(admin.group_id)
@@ -292,11 +293,13 @@ class SettlementService:
                 )
 
             admin_user = await self.db.get(User, admin.user_id)
+            from app.modules.platform_settings.service import PlatformSettingsService
+            settings_row = await (platform_settings or PlatformSettingsService(self.db)).get_or_create()
             sub_account = await monnify.create_sub_account(
                 bank_code=account.bank_code,
                 account_number=account.account_number,
                 email=admin_user.email if admin_user else "",
-                split_percentage=DIRECT_MODE_SPLIT_PERCENTAGE,
+                split_percentage=Decimal("100") - settings_row.platform_fee_percent,
             )
             account.direct_sub_account_code = sub_account.sub_account_code
         else:

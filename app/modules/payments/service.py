@@ -161,10 +161,11 @@ class MonnifyClient:
             "expiryDate": expires_at.astimezone(_MONNIFY_TZ).strftime("%Y-%m-%d %H:%M:%S"),
         }
         if sub_account_code and not income_split_config:
+            sub_pct = float(Decimal("100") - platform_fee_percent) if platform_fee_percent is not None else 99.0
             income_split_config = [
                 {
                     "subAccountCode": sub_account_code,
-                    "splitPercentage": float(DIRECT_MODE_SPLIT_PERCENTAGE),
+                    "splitPercentage": sub_pct,
                     "feePercentage": 0.0,
                     "feeBearer": True,
                 }

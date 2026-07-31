@@ -213,7 +213,7 @@ async def process_collection_webhook_event(
             await service.mark_processed(event_id, error="no contribution matches payment reference")
             return
 
-        if contribution.status != ContributionStatus.PENDING:
+        if contribution.status not in (ContributionStatus.PENDING, ContributionStatus.EXPIRED):
             await service.mark_processed(
                 event_id, error=f"contribution already {contribution.status.value}, skipped"
             )

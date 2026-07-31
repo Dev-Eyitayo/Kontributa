@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 from datetime import datetime
 from decimal import Decimal
 from uuid import UUID
@@ -78,8 +79,21 @@ def _extract_collection_event(raw_payload: str) -> CollectionEventData | None:
     # 2. Paystack collection event
     if payload.get("event") == "charge.success":
         event_data = payload.get("data", {})
+        metadata = event_data.get("metadata") or {}
+
+        # 2a. Check explicit metadata invoice_id or referrer URL (e.g. https://paystack.shop/pay/PRQ_wte6pqhc8nbh679)
+        prq_code = None
+        if isinstance(metadata, dict) and metadata.get("invoice_id"):
+            prq_code = str(metadata["invoice_id"])
+        else:
+            str_metadata = json.dumps(metadata) if isinstance(metadata, (dict, list)) else str(metadata)
+            match = re.search(r"PRQ_[a-zA-Z0-9]+", str_metadata)
+            if match:
+                prq_code = match.group(0)
+
         payment_ref = (
-            event_data.get("payment_request_code")
+            prq_code
+            or event_data.get("payment_request_code")
             or event_data.get("request_code")
             or event_data.get("reference")
             or ""

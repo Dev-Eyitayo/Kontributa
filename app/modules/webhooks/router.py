@@ -110,7 +110,7 @@ async def paystack_webhook(
     payload = json.loads(raw_body)
     event_type = payload.get("event")
     event_data = payload.get("data", {})
-    provider_event_id = event_data.get("reference") or event_data.get("id")
+    provider_event_id = str(event_data.get("id") or event_data.get("reference"))
 
     service = WebhookService(db)
     event, is_new = await service.store_event(str(provider_event_id), raw_body.decode(), signature_valid=True)

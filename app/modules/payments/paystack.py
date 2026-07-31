@@ -179,6 +179,9 @@ class PaystackClient(DirectPaymentProvider):
             "amount": amount_kobo,
             "description": description or f"Contribution {invoice_reference}",
             "due_date": expires_at.strftime("%Y-%m-%d"),
+            "metadata": {
+                "invoice_id": invoice_reference,
+            },
         }
         if sub_account_code:
             payload["subaccount"] = sub_account_code

@@ -117,23 +117,7 @@ async def paystack_webhook(
 
     if is_new:
         session_factory = async_sessionmaker(bind=db.bind, expire_on_commit=False)
-        if event_type in ("subaccount.settlement", "settlement.success"):
-            subaccount = event_data.get("subaccount", {})
-            sub_code = subaccount.get("subaccount_code") if isinstance(subaccount, dict) else str(subaccount or "")
-            settlement_payload = {
-                "eventType": "SUCCESSFUL_SETTLEMENT",
-                "eventData": {
-                    "settlementReference": str(event_data.get("id") or provider_event_id),
-                    "subAccountCode": sub_code,
-                    "amount": float(Decimal(str(event_data.get("total_amount") or event_data.get("amount", 0))) / Decimal("100")),
-                    "fee": float(Decimal(str(event_data.get("total_fees") or event_data.get("fee", 0))) / Decimal("100")),
-                    "settledAmount": float(Decimal(str(event_data.get("settled_amount") or event_data.get("amount", 0))) / Decimal("100")),
-                    "status": "COMPLETED",
-                    "settlementTime": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f"),
-                },
-            }
-            background_tasks.add_task(process_settlement_webhook_event, event.id, session_factory, settlement_payload)
-        elif event_type == "charge.success":
+        if event_type == "charge.success":
             background_tasks.add_task(process_collection_webhook_event, event.id, session_factory, email_client, realtime)
         elif event_type in ("transfer.success", "transfer.failed", "transfer.reversed"):
             background_tasks.add_task(process_transfer_webhook_event, event.id, session_factory, email_client)

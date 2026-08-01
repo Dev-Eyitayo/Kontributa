@@ -571,11 +571,16 @@ class ContributionService:
                 code="purse_closed",
             )
 
+        invoice_expires_at = (
+            contribution.invoice_expires_at.replace(tzinfo=timezone.utc)
+            if contribution.invoice_expires_at is not None and contribution.invoice_expires_at.tzinfo is None
+            else contribution.invoice_expires_at
+        )
         has_live_invoice = (
             contribution.status == ContributionStatus.PENDING
             and contribution.account_number is not None
-            and contribution.invoice_expires_at is not None
-            and contribution.invoice_expires_at > now
+            and invoice_expires_at is not None
+            and invoice_expires_at > now
         )
         if has_live_invoice:
             return contribution

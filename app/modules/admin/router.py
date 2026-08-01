@@ -113,7 +113,7 @@ async def reprocess_webhook_event(
     payload = json.loads(event.raw_payload)
     event_type = payload.get("event") or payload.get("eventType")
 
-    if event_type in ("subaccount.settlement", "settlement.success", "SUCCESSFUL_SETTLEMENT", "SETTLEMENT_COMPLETED"):
+    if event_type in ("SUCCESSFUL_SETTLEMENT", "SETTLEMENT_COMPLETED"):
         background_tasks.add_task(process_settlement_webhook_event, event.id, session_factory, payload)
     elif event_type in ("transfer.success", "transfer.failed", "transfer.reversed", "SUCCESSFUL_DISBURSEMENT", "FAILED_DISBURSEMENT", "REVERSED_DISBURSEMENT"):
         background_tasks.add_task(process_transfer_webhook_event, event.id, session_factory, email_client)

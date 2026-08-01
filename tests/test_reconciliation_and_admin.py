@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from uuid import UUID
 
 from sqlalchemy import select
 
@@ -17,7 +18,7 @@ async def _admin_headers(db_session):
 
 
 async def _backdate_past_threshold(db_session, contribution_id: str) -> None:
-    result = await db_session.execute(select(Contribution).where(Contribution.id == contribution_id))
+    result = await db_session.execute(select(Contribution).where(Contribution.id == UUID(contribution_id)))
     contribution = result.scalar_one()
     past = datetime.now(timezone.utc) - timedelta(hours=2)
     # updated_at has an onupdate=func.now() trigger on ORM flush, so set it
@@ -25,7 +26,7 @@ async def _backdate_past_threshold(db_session, contribution_id: str) -> None:
     from sqlalchemy import update
 
     await db_session.execute(
-        update(Contribution).where(Contribution.id == contribution_id).values(updated_at=past)
+        update(Contribution).where(Contribution.id == UUID(contribution_id)).values(updated_at=past)
     )
     await db_session.commit()
 
@@ -35,7 +36,7 @@ async def test_reconciliation_recovers_dropped_webhook(client, db_session):
     await _generate_invoice(client, ctx["member_headers"], ctx["contribution_id"])
     await _backdate_past_threshold(db_session, ctx["contribution_id"])
 
-    result = await db_session.execute(select(Contribution).where(Contribution.id == ctx["contribution_id"]))
+    result = await db_session.execute(select(Contribution).where(Contribution.id == UUID(ctx["contribution_id"])))
     contribution = result.scalar_one()
     _state["monnify"].transaction_statuses[contribution.invoice_id] = MonnifyTransactionStatus(
         transaction_reference="MNFY|manual-check",
@@ -66,7 +67,7 @@ async def test_reconciliation_run_twice_does_not_double_apply(client, db_session
     await _generate_invoice(client, ctx["member_headers"], ctx["contribution_id"])
     await _backdate_past_threshold(db_session, ctx["contribution_id"])
 
-    result = await db_session.execute(select(Contribution).where(Contribution.id == ctx["contribution_id"]))
+    result = await db_session.execute(select(Contribution).where(Contribution.id == UUID(ctx["contribution_id"])))
     contribution = result.scalar_one()
     _state["monnify"].transaction_statuses[contribution.invoice_id] = MonnifyTransactionStatus(
         transaction_reference="MNFY|manual-check",
@@ -93,7 +94,7 @@ async def test_reconciliation_skips_contributions_not_past_threshold(client, db_
     await _generate_invoice(client, ctx["member_headers"], ctx["contribution_id"])
     # Deliberately not backdated -- still fresh, should not be picked up yet.
 
-    result = await db_session.execute(select(Contribution).where(Contribution.id == ctx["contribution_id"]))
+    result = await db_session.execute(select(Contribution).where(Contribution.id == UUID(ctx["contribution_id"])))
     contribution = result.scalar_one()
     _state["monnify"].transaction_statuses[contribution.invoice_id] = MonnifyTransactionStatus(
         transaction_reference="MNFY|manual-check",
@@ -103,8 +104,12 @@ async def test_reconciliation_skips_contributions_not_past_threshold(client, db_
         paid_on=None,
     )
 
+    # force=False -- an admin-triggered run with no body defaults to
+    # force=True (see admin/router.py::trigger_reconciliation), which
+    # checks every pending/expired contribution regardless of age; this
+    # test is specifically about the threshold-respecting path.
     admin_headers = await _admin_headers(db_session)
-    run = await client.post("/admin/reconciliation/run", headers=admin_headers)
+    run = await client.post("/admin/reconciliation/run", json={"force": False}, headers=admin_headers)
     assert run.json()["data"] == {"checked": 0, "updated": 0}
 
     detail = await client.get(f"/contributions/{ctx['contribution_id']}", headers=ctx["member_headers"])
@@ -134,7 +139,7 @@ async def test_display_status_reads_pending_for_expired_invoice_on_open_purse(cl
     past_update = datetime.now(timezone.utc) - timedelta(hours=2)
     await db_session.execute(
         update(Contribution)
-        .where(Contribution.id == ctx["contribution_id"])
+        .where(Contribution.id == UUID(ctx["contribution_id"]))
         .values(invoice_expires_at=past_expiry, updated_at=past_update)
     )
     await db_session.commit()
@@ -142,9 +147,13 @@ async def test_display_status_reads_pending_for_expired_invoice_on_open_purse(cl
     admin_headers = await _admin_headers(db_session)
     run = await client.post("/admin/reconciliation/run", headers=admin_headers)
     assert run.status_code == 200
-    assert run.json()["data"] == {"checked": 1, "updated": 1}
+    # `updated` counts payment confirmations only (run_reconciliation
+    # increments it solely on apply_payment_confirmation returning
+    # non-None) -- an expiry transition via expire_if_needed doesn't
+    # touch it, even though this contribution's status did change.
+    assert run.json()["data"] == {"checked": 1, "updated": 0}
 
-    result = await db_session.execute(select(Contribution).where(Contribution.id == ctx["contribution_id"]))
+    result = await db_session.execute(select(Contribution).where(Contribution.id == UUID(ctx["contribution_id"])))
     contribution = result.scalar_one()
     assert contribution.status == ContributionStatus.EXPIRED
 
@@ -223,7 +232,7 @@ async def test_admin_webhook_events_and_flagged_contributions(client, db_session
     ctx = await _setup_purse_with_member(client, db_session, amount="2500.00")
     await _generate_invoice(client, ctx["member_headers"], ctx["contribution_id"])
 
-    result = await db_session.execute(select(Contribution).where(Contribution.id == ctx["contribution_id"]))
+    result = await db_session.execute(select(Contribution).where(Contribution.id == UUID(ctx["contribution_id"])))
     contribution = result.scalar_one()
 
     import hashlib
@@ -300,7 +309,7 @@ async def test_webhook_events_pagination(client, db_session):
 
 async def test_flagged_contributions_pagination(client, db_session):
     ctx = await _setup_purse_with_member(client, db_session, amount="2500.00")
-    result = await db_session.execute(select(Contribution).where(Contribution.id == ctx["contribution_id"]))
+    result = await db_session.execute(select(Contribution).where(Contribution.id == UUID(ctx["contribution_id"])))
     contribution = result.scalar_one()
     contribution.status = ContributionStatus.FLAGGED_FOR_REVIEW
     contribution.amount_received = Decimal("100.00")

@@ -1,4 +1,5 @@
 import json
+from uuid import UUID
 
 from sqlalchemy import select
 
@@ -84,7 +85,7 @@ async def test_webhook_paid_publishes_realtime_status_change(client, db_session)
     ctx = await _setup_purse_with_member(client, db_session, amount="2500.00")
     await _generate_invoice(client, ctx["member_headers"], ctx["contribution_id"])
 
-    result = await db_session.execute(select(Contribution).where(Contribution.id == ctx["contribution_id"]))
+    result = await db_session.execute(select(Contribution).where(Contribution.id == UUID(ctx["contribution_id"])))
     contribution = result.scalar_one()
 
     _state["realtime"].published.clear()

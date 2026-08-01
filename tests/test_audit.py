@@ -1,12 +1,14 @@
 import hashlib
 from datetime import datetime, timedelta, timezone
+from uuid import UUID
 
 import pytest
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
+from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.exc import DBAPIError
 
 from app.modules.audit.service import AuditService
-from tests.conftest import create_org_and_group, find_redis_token, onboard_group_admin
+from tests.conftest import USE_POSTGRES, create_org_and_group, find_redis_token, onboard_group_admin
 
 
 async def _register_and_login_group_admin(client, email="rep@example.com"):
@@ -72,7 +74,7 @@ async def _setup_purse_with_paid_contribution(client, db_session, email="rep@exa
     # the group's own admin at creation time now (see
     # ContributionService.generate_for_purse).
     result = await db_session.execute(
-        select(Contribution).where(Contribution.purse_id == purse_id, Contribution.member_id.is_not(None))
+        select(Contribution).where(Contribution.purse_id == UUID(purse_id), Contribution.member_id.is_not(None))
     )
     contribution = result.scalar_one()
 
@@ -236,16 +238,36 @@ async def test_verify_chain_detects_a_directly_inserted_tampered_row(client, db_
     import uuid
 
     fake_id = uuid.uuid4()
+    # Raw text() SQL bypasses the ORM column's UUID(as_uuid=True) type
+    # decorator entirely, so a bare Python uuid.UUID param binds however
+    # the raw DBAPI driver feels like -- which differs by dialect (SQLite's
+    # sqlite3 driver rejects a uuid.UUID object outright; asyncpg wants one,
+    # not a str). bindparam(type_=PGUUID(as_uuid=True)) reinstates the same
+    # per-dialect conversion the ORM gets for free, using the same compiler
+    # shim (_compile_uuid_sqlite, top of conftest.py) the rest of this
+    # suite already relies on for that type under SQLite.
+    stmt = text(
+        """
+        INSERT INTO audit_log
+            (id, entity_type, entity_id, action, actor_type, actor_id, before_state, after_state, prev_hash, row_hash, created_at)
+        VALUES
+            (:id, 'contribution', :entity_id, 'forged_entry', 'webhook', NULL, NULL, NULL, NULL, :row_hash, :created_at)
+        """
+    ).bindparams(
+        bindparam("id", type_=PGUUID(as_uuid=True)),
+        bindparam("entity_id", type_=PGUUID(as_uuid=True)),
+    )
     await db_session.execute(
-        text(
-            """
-            INSERT INTO audit_log
-                (id, entity_type, entity_id, action, actor_type, actor_id, before_state, after_state, prev_hash, row_hash, created_at)
-            VALUES
-                (:id, 'contribution', :entity_id, 'forged_entry', 'webhook', NULL, NULL, NULL, NULL, :row_hash, now())
-            """
-        ),
-        {"id": fake_id, "entity_id": uuid.uuid4(), "row_hash": hashlib.sha256(b"not-the-real-hash").hexdigest()},
+        stmt,
+        {
+            "id": fake_id,
+            "entity_id": uuid.uuid4(),
+            "row_hash": hashlib.sha256(b"not-the-real-hash").hexdigest(),
+            # A bound parameter, not the SQL-level now() -- Postgres-only,
+            # unlike the rest of this codebase's func.now() usage; SQLite
+            # (this suite's default dialect) has no such function.
+            "created_at": datetime.now(timezone.utc),
+        },
     )
     await db_session.commit()
 
@@ -254,6 +276,17 @@ async def test_verify_chain_detects_a_directly_inserted_tampered_row(client, db_
     assert tampered_result["broken_at_id"] == str(fake_id)
 
 
+@pytest.mark.skipif(
+    not USE_POSTGRES,
+    reason=(
+        "Exercises a real Postgres role-level REVOKE (see migration "
+        "83d4db43c592) -- SQLite has no GRANT/REVOKE/role system at all, so "
+        "this UPDATE/DELETE simply succeeds there instead of hitting a "
+        "permissions error, which isn't a false positive to paper over, "
+        "just not a thing SQLite can prove either way. Passes under "
+        "USE_POSTGRES=1."
+    ),
+)
 async def test_app_role_cannot_update_or_delete_audit_log(client, db_session):
     """Must fail with a real database permissions error using the
     application's own role/connection -- not merely because the ORM layer
@@ -290,7 +323,7 @@ async def test_payout_status_transitions_are_queryable_via_audit(client, db_sess
     # one -- needs real, Monnify-held money (ContributionStatus.PAID) to
     # request a payout at all, since PAID_MANUAL is deliberately excluded
     # from available_balance (see PayoutService._collected_total).
-    result = await db_session.execute(select(Contribution).where(Contribution.id == contribution_id))
+    result = await db_session.execute(select(Contribution).where(Contribution.id == UUID(contribution_id)))
     contribution = result.scalar_one()
     contribution.status = ContributionStatus.PAID
     await db_session.commit()

@@ -2,7 +2,7 @@ import hashlib
 import hmac
 import json
 from datetime import datetime, timedelta, timezone
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from sqlalchemy import select
 
@@ -82,7 +82,7 @@ async def _setup_purse_with_member(client, db_session, amount="2500.00"):
     # the group's own admin at creation time now (see
     # ContributionService.generate_for_purse).
     result = await db_session.execute(
-        select(Contribution).where(Contribution.purse_id == purse_id, Contribution.member_id.is_not(None))
+        select(Contribution).where(Contribution.purse_id == UUID(purse_id), Contribution.member_id.is_not(None))
     )
     contribution = result.scalar_one()
 
@@ -132,7 +132,7 @@ async def _setup_purse_with_two_members(client, db_session, amount="1000.00"):
             select(Contribution, Member, User)
             .join(Member, Contribution.member_id == Member.id)
             .join(User, Member.user_id == User.id)
-            .where(Contribution.purse_id == purse_id)
+            .where(Contribution.purse_id == UUID(purse_id))
         )
     ).all()
     paid_contribution_id = next(str(c.id) for c, m, u in rows if u.email == "paid-member@example.com")
@@ -201,7 +201,7 @@ async def _setup_purse_with_paid_contribution(client, db_session, collected="250
     purse_id = create.json()["data"]["id"]
 
     result = await db_session.execute(
-        select(Contribution).where(Contribution.purse_id == purse_id, Contribution.member_id.is_not(None))
+        select(Contribution).where(Contribution.purse_id == UUID(purse_id), Contribution.member_id.is_not(None))
     )
     contribution = result.scalar_one()
 
@@ -218,20 +218,6 @@ async def _setup_purse_with_paid_contribution(client, db_session, collected="250
     await db_session.commit()
 
     return org, group, headers, purse_id
-
-
-async def _register_settlement_account(client, group_id, headers, account_number="0123456789"):
-    resp = await client.post(
-        f"/groups/{group_id}/settlement-account",
-        json={
-            "bank_code": "058",
-            "account_number": account_number,
-            "confirmed_account_name": "Default Resolved Name",
-        },
-        headers=headers,
-    )
-    assert resp.status_code == 201, resp.text
-    return resp.json()["data"]
 
 
 async def test_register_sends_verification_email(client):
@@ -299,7 +285,7 @@ async def test_receipt_email_sent_on_webhook_paid(client, db_session):
     await _generate_invoice(client, ctx["member_headers"], ctx["contribution_id"])
     _state["sendbyte"].sent.clear()  # discard the join-time verification email
 
-    result = await db_session.execute(select(Contribution).where(Contribution.id == ctx["contribution_id"]))
+    result = await db_session.execute(select(Contribution).where(Contribution.id == UUID(ctx["contribution_id"])))
     contribution = result.scalar_one()
 
     body = _collection_webhook_body(contribution.invoice_id, "2500.00")
@@ -316,7 +302,7 @@ async def test_expiry_notice_sent_when_invoice_lapses(client, db_session):
     await _generate_invoice(client, ctx["member_headers"], ctx["contribution_id"])
     _state["sendbyte"].sent.clear()  # discard the join-time verification email
 
-    result = await db_session.execute(select(Contribution).where(Contribution.id == ctx["contribution_id"]))
+    result = await db_session.execute(select(Contribution).where(Contribution.id == UUID(ctx["contribution_id"])))
     contribution = result.scalar_one()
     contribution.invoice_expires_at = datetime.now(timezone.utc) - timedelta(minutes=1)
     await db_session.commit()
@@ -335,7 +321,7 @@ async def test_email_failure_does_not_block_payment_confirmation(client, db_sess
     await _generate_invoice(client, ctx["member_headers"], ctx["contribution_id"])
     _state["sendbyte"].should_fail = True
 
-    result = await db_session.execute(select(Contribution).where(Contribution.id == ctx["contribution_id"]))
+    result = await db_session.execute(select(Contribution).where(Contribution.id == UUID(ctx["contribution_id"])))
     contribution = result.scalar_one()
 
     body = _collection_webhook_body(contribution.invoice_id, "2500.00")
@@ -376,7 +362,6 @@ async def test_notification_log_records_each_send(client, db_session):
 
 async def test_payout_completed_email_sent_to_rep(client, db_session):
     org, group, headers, purse_id = await _setup_purse_with_paid_contribution(client, db_session, collected="2500.00")
-    await _register_settlement_account(client, group.id, headers)
     _state["sendbyte"].sent.clear()
 
     create = await client.post(
@@ -406,7 +391,6 @@ async def test_payout_completed_email_sent_to_rep(client, db_session):
 
 async def test_payout_failed_email_sent_to_rep(client, db_session):
     org, group, headers, purse_id = await _setup_purse_with_paid_contribution(client, db_session, collected="2500.00")
-    await _register_settlement_account(client, group.id, headers)
     _state["monnify"].transfer_should_fail = True
     _state["sendbyte"].sent.clear()
 
@@ -455,7 +439,7 @@ async def test_remind_weekly_cooldown_blocks_immediate_repeat(client, db_session
     # on their own contribution) -- see ContributionService.generate_for_purse.
     assert len(_state["sendbyte"].sent) == 2
 
-    result = await db_session.execute(select(Purse).where(Purse.id == purse_id))
+    result = await db_session.execute(select(Purse).where(Purse.id == UUID(purse_id)))
     purse = result.scalar_one()
     purse.last_reminder_sent_at = datetime.now(timezone.utc) - timedelta(
         days=settings.REMINDER_MIN_INTERVAL_DAYS, hours=1

@@ -53,7 +53,12 @@ async def remind_purse(
         raise BusinessRuleError("reminder emails are currently disabled", code="reminders_disabled")
 
     if purse.last_reminder_sent_at is not None:
-        elapsed = datetime.now(timezone.utc) - purse.last_reminder_sent_at
+        last_reminder_sent_at = (
+            purse.last_reminder_sent_at.replace(tzinfo=timezone.utc)
+            if purse.last_reminder_sent_at.tzinfo is None
+            else purse.last_reminder_sent_at
+        )
+        elapsed = datetime.now(timezone.utc) - last_reminder_sent_at
         if elapsed < timedelta(days=settings.REMINDER_MIN_INTERVAL_DAYS):
             raise BusinessRuleError(
                 f"a reminder was already sent for this purse within the last "

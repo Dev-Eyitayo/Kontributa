@@ -171,6 +171,15 @@ async def list_purses(
             admin = admin_res.scalar_one_or_none()
             if admin is not None:
                 is_admin = True
+            # Not an admin of *this* group_id -- rather than silently
+            # falling through to the generic member branch below (which
+            # resolves "the" member row for this user with no group
+            # scoping at all, and 404s if the caller happens to have none,
+            # a confusing error for what's actually an authorization
+            # failure), require they at least be a Member of this specific
+            # group before treating the request as a member-view query.
+            elif await MemberService(db).get_by_user_and_group(current_user.id, group_id) is None:
+                raise ForbiddenError("you do not have access to this group")
     elif current_user.role == "group_admin" or is_platform_admin:
         raise BusinessRuleError(
             "group_id is required -- an admin may manage more than one group", code="group_id_required"

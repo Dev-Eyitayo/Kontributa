@@ -2,7 +2,7 @@ import hashlib
 import hmac
 import json
 from datetime import datetime, timedelta, timezone
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from sqlalchemy import select
 
@@ -75,7 +75,7 @@ async def _setup_purse_with_member(client, db_session, amount="2500.00"):
     # ContributionService.generate_for_purse), so "the one contribution
     # for this purse" is no longer unambiguous on its own.
     result = await db_session.execute(
-        select(Contribution).where(Contribution.purse_id == purse_id, Contribution.member_id.is_not(None))
+        select(Contribution).where(Contribution.purse_id == UUID(purse_id), Contribution.member_id.is_not(None))
     )
     contribution = result.scalar_one()
 
@@ -154,7 +154,7 @@ async def test_generate_invoice_regenerates_after_expiry(client, db_session):
     first = await _generate_invoice(client, ctx["member_headers"], ctx["contribution_id"])
 
     # Backdate the invoice so it reads as expired without waiting.
-    result = await db_session.execute(select(Contribution).where(Contribution.id == ctx["contribution_id"]))
+    result = await db_session.execute(select(Contribution).where(Contribution.id == UUID(ctx["contribution_id"])))
     contribution = result.scalar_one()
     contribution.invoice_expires_at = datetime.now(timezone.utc) - timedelta(minutes=1)
     await db_session.commit()
@@ -183,12 +183,12 @@ async def test_generate_invoice_rejected_once_purse_deadline_passed(client, db_s
     # Expire the invoice AND push the purse's own deadline into the past --
     # regeneration must stop once the purse itself is no longer open, not
     # just because the previous invoice expired.
-    result = await db_session.execute(select(Contribution).where(Contribution.id == ctx["contribution_id"]))
+    result = await db_session.execute(select(Contribution).where(Contribution.id == UUID(ctx["contribution_id"])))
     contribution = result.scalar_one()
     contribution.invoice_expires_at = datetime.now(timezone.utc) - timedelta(minutes=1)
     await db_session.commit()
 
-    purse = await db_session.get(Purse, ctx["purse_id"])
+    purse = await db_session.get(Purse, UUID(ctx["purse_id"]))
     purse.deadline = datetime.now(timezone.utc) - timedelta(minutes=1)
     await db_session.commit()
 
@@ -203,7 +203,7 @@ async def test_webhook_wrong_signature_rejected(client, db_session):
     ctx = await _setup_purse_with_member(client, db_session)
     await _generate_invoice(client, ctx["member_headers"], ctx["contribution_id"])
 
-    result = await db_session.execute(select(Contribution).where(Contribution.id == ctx["contribution_id"]))
+    result = await db_session.execute(select(Contribution).where(Contribution.id == UUID(ctx["contribution_id"])))
     contribution = result.scalar_one()
 
     body = _webhook_body(contribution.invoice_id, "2500.00")
@@ -221,7 +221,7 @@ async def test_webhook_correct_signature_moves_pending_to_paid(client, db_sessio
     ctx = await _setup_purse_with_member(client, db_session)
     await _generate_invoice(client, ctx["member_headers"], ctx["contribution_id"])
 
-    result = await db_session.execute(select(Contribution).where(Contribution.id == ctx["contribution_id"]))
+    result = await db_session.execute(select(Contribution).where(Contribution.id == UUID(ctx["contribution_id"])))
     contribution = result.scalar_one()
 
     body = _webhook_body(contribution.invoice_id, "2500.00")
@@ -239,7 +239,7 @@ async def test_webhook_duplicate_delivery_processed_once(client, db_session):
     ctx = await _setup_purse_with_member(client, db_session)
     await _generate_invoice(client, ctx["member_headers"], ctx["contribution_id"])
 
-    result = await db_session.execute(select(Contribution).where(Contribution.id == ctx["contribution_id"]))
+    result = await db_session.execute(select(Contribution).where(Contribution.id == UUID(ctx["contribution_id"])))
     contribution = result.scalar_one()
 
     body = _webhook_body(contribution.invoice_id, "2500.00", transaction_reference="MNFY|fixed-ref-123")
@@ -259,7 +259,7 @@ async def test_webhook_underpayment_flags_for_review(client, db_session):
     ctx = await _setup_purse_with_member(client, db_session, amount="2500.00")
     await _generate_invoice(client, ctx["member_headers"], ctx["contribution_id"])
 
-    result = await db_session.execute(select(Contribution).where(Contribution.id == ctx["contribution_id"]))
+    result = await db_session.execute(select(Contribution).where(Contribution.id == UUID(ctx["contribution_id"])))
     contribution = result.scalar_one()
 
     body = _webhook_body(contribution.invoice_id, "2000.00")
@@ -274,7 +274,7 @@ async def test_webhook_overpayment_flags_for_review(client, db_session):
     ctx = await _setup_purse_with_member(client, db_session, amount="2500.00")
     await _generate_invoice(client, ctx["member_headers"], ctx["contribution_id"])
 
-    result = await db_session.execute(select(Contribution).where(Contribution.id == ctx["contribution_id"]))
+    result = await db_session.execute(select(Contribution).where(Contribution.id == UUID(ctx["contribution_id"])))
     contribution = result.scalar_one()
 
     body = _webhook_body(contribution.invoice_id, "3000.00")
@@ -295,7 +295,7 @@ async def test_webhook_rejected_payment_leaves_contribution_pending(client, db_s
     ctx = await _setup_purse_with_member(client, db_session, amount="2500.00")
     await _generate_invoice(client, ctx["member_headers"], ctx["contribution_id"])
 
-    result = await db_session.execute(select(Contribution).where(Contribution.id == ctx["contribution_id"]))
+    result = await db_session.execute(select(Contribution).where(Contribution.id == UUID(ctx["contribution_id"])))
     contribution = result.scalar_one()
 
     body = _rejected_payment_webhook_body(contribution.invoice_id, amount="2000.00", expected_amount="2500.00")
@@ -356,7 +356,7 @@ async def test_resolve_flag_accept_partial_and_request_topup(client, db_session)
     ctx = await _setup_purse_with_member(client, db_session, amount="2500.00")
     await _generate_invoice(client, ctx["member_headers"], ctx["contribution_id"])
 
-    result = await db_session.execute(select(Contribution).where(Contribution.id == ctx["contribution_id"]))
+    result = await db_session.execute(select(Contribution).where(Contribution.id == UUID(ctx["contribution_id"])))
     contribution = result.scalar_one()
     body = _webhook_body(contribution.invoice_id, "2000.00")
     await client.post("/webhooks/monnify", content=body, headers={"monnify-signature": _sign(body)})
@@ -374,7 +374,7 @@ async def test_resolve_flag_request_topup_returns_to_pending(client, db_session)
     ctx = await _setup_purse_with_member(client, db_session, amount="2500.00")
     await _generate_invoice(client, ctx["member_headers"], ctx["contribution_id"])
 
-    result = await db_session.execute(select(Contribution).where(Contribution.id == ctx["contribution_id"]))
+    result = await db_session.execute(select(Contribution).where(Contribution.id == UUID(ctx["contribution_id"])))
     contribution = result.scalar_one()
     body = _webhook_body(contribution.invoice_id, "2000.00")
     await client.post("/webhooks/monnify", content=body, headers={"monnify-signature": _sign(body)})
@@ -396,7 +396,7 @@ async def test_resolve_flag_refund_not_yet_supported(client, db_session):
     ctx = await _setup_purse_with_member(client, db_session, amount="2500.00")
     await _generate_invoice(client, ctx["member_headers"], ctx["contribution_id"])
 
-    result = await db_session.execute(select(Contribution).where(Contribution.id == ctx["contribution_id"]))
+    result = await db_session.execute(select(Contribution).where(Contribution.id == UUID(ctx["contribution_id"])))
     contribution = result.scalar_one()
     body = _webhook_body(contribution.invoice_id, "3000.00")
     await client.post("/webhooks/monnify", content=body, headers={"monnify-signature": _sign(body)})
@@ -481,14 +481,14 @@ async def test_purse_summary_splits_collected_by_source(client, db_session):
             select(Contribution.id, User.email)
             .join(Member, Contribution.member_id == Member.id)
             .join(User, Member.user_id == User.id)
-            .where(Contribution.purse_id == purse_id)
+            .where(Contribution.purse_id == UUID(purse_id))
         )
     ).all()
     contribution_by_email = {email: str(cid) for cid, email in rows}
 
     kontributa_contribution_id = contribution_by_email["kontributa-payer@example.com"]
     await _generate_invoice(client, member_a_headers, kontributa_contribution_id)
-    result = await db_session.execute(select(Contribution).where(Contribution.id == kontributa_contribution_id))
+    result = await db_session.execute(select(Contribution).where(Contribution.id == UUID(kontributa_contribution_id)))
     invoice_id = result.scalar_one().invoice_id
 
     body = _webhook_body(invoice_id, "1000.00")

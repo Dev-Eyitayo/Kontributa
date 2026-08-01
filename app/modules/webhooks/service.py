@@ -351,6 +351,7 @@ async def process_settlement_webhook_event(
                 dest_number = None
                 dest_bank_code = None
                 dest_bank_name = None
+                status = data.get("status", "COMPLETED")
             else:
                 event_data = payload.get("eventData", {})
                 settlement_ref = (
@@ -368,6 +369,17 @@ async def process_settlement_webhook_event(
                 dest_number = event_data.get("destinationAccountNumber")
                 dest_bank_code = event_data.get("destinationBankCode")
                 dest_bank_name = event_data.get("destinationBankName")
+                status = event_data.get("status", "COMPLETED")
+
+            group_id = None
+            if sub_account_code:
+                settlement_acc = (
+                    await db.execute(
+                        select(SettlementAccount).where(SettlementAccount.direct_sub_account_code == sub_account_code)
+                    )
+                ).scalar_one_or_none()
+                if settlement_acc:
+                    group_id = settlement_acc.group_id
 
             log_entry = MonnifySettlementLog(
                 settlement_reference=settlement_ref,
@@ -380,7 +392,7 @@ async def process_settlement_webhook_event(
                 destination_account_number=dest_number,
                 destination_bank_code=dest_bank_code,
                 destination_bank_name=dest_bank_name,
-                status=event_data.get("status", "COMPLETED"),
+                status=status,
                 settlement_time=settlement_time,
                 raw_payload=json.dumps(payload),
             )

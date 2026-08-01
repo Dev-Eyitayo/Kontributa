@@ -3,11 +3,19 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from uuid import UUID
 
+import pytest
 from sqlalchemy import select
 
 from app.core.auth import create_access_token
 from app.modules.contributions.models import Contribution
-from tests.conftest import _state, create_org_and_group, create_platform_admin, find_redis_token, onboard_group_admin
+from tests.conftest import (
+    USE_POSTGRES,
+    _state,
+    create_org_and_group,
+    create_platform_admin,
+    find_redis_token,
+    onboard_group_admin,
+)
 
 
 async def _admin_platform_headers(db_session):
@@ -35,6 +43,19 @@ async def _register_and_login_group_admin(client, email="rep@example.com"):
 
 def _future_deadline(days=7) -> str:
     return (datetime.now(timezone.utc) + timedelta(days=days)).isoformat()
+
+
+async def _setup_group_without_settlement(client, db_session, email="rep@example.com"):
+    """For the handful of tests that specifically need a "starts from
+    nothing" group -- POST /purses now requires a settlement account to
+    already exist (settlement_account_required), so this can never grow
+    a purse the way _setup_purse_with_paid_contribution does; it stops
+    right after onboarding, before any settlement account exists."""
+    org, _existing_group = await create_org_and_group(db_session)
+    admin_token = await _register_and_login_group_admin(client, email=email)
+    headers = {"Authorization": f"Bearer {admin_token}"}
+    group = await onboard_group_admin(client, db_session, org, headers, with_settlement=False)
+    return org, group, headers
 
 
 async def _setup_purse_with_paid_contribution(client, db_session, collected="2500.00", email="rep@example.com"):
@@ -142,22 +163,8 @@ async def _add_purse_with_collected_amount(client, db_session, headers, group_id
     return purse_id
 
 
-async def _register_settlement_account(client, group_id, headers, account_number="0123456789"):
-    resp = await client.post(
-        f"/groups/{group_id}/settlement-account",
-        json={
-            "bank_code": "058",
-            "account_number": account_number,
-            "confirmed_account_name": "Default Resolved Name",
-        },
-        headers=headers,
-    )
-    assert resp.status_code == 201, resp.text
-    return resp.json()["data"]
-
-
 async def test_settlement_lookup_does_not_save(client, db_session):
-    org, group, headers, purse_id = await _setup_purse_with_paid_contribution(client, db_session)
+    org, group, headers = await _setup_group_without_settlement(client, db_session)
 
     lookup = await client.post(
         f"/groups/{group.id}/settlement-account/lookup",
@@ -187,7 +194,10 @@ async def test_list_banks_is_cached_between_calls(client, db_session):
     first = await client.get("/banks", headers=headers)
     assert first.status_code == 200
 
-    cached_raw = await _state["redis"].get("banks:monnify")
+    # Cache key is per active provider (see banks/router.py) -- default
+    # is "paystack" now (PlatformSettings.active_payment_provider), not
+    # "monnify".
+    cached_raw = await _state["redis"].get("banks:paystack")
     assert cached_raw is not None
 
     second = await client.get("/banks", headers=headers)
@@ -222,7 +232,17 @@ async def test_list_banks_requires_group_admin_role(client, db_session):
 
 async def test_settlement_save_success_and_masked_get(client, db_session):
     org, group, headers, purse_id = await _setup_purse_with_paid_contribution(client, db_session)
-    await _register_settlement_account(client, group.id, headers)
+
+    save = await client.post(
+        f"/groups/{group.id}/settlement-account",
+        json={
+            "bank_code": "058",
+            "account_number": "0123456789",
+            "confirmed_account_name": "Default Resolved Name",
+        },
+        headers=headers,
+    )
+    assert save.status_code == 201, save.text
 
     get_resp = await client.get(f"/groups/{group.id}/settlement-account", headers=headers)
     assert get_resp.status_code == 200
@@ -232,7 +252,7 @@ async def test_settlement_save_success_and_masked_get(client, db_session):
 
 
 async def test_settlement_save_rejects_name_mismatch(client, db_session):
-    org, group, headers, purse_id = await _setup_purse_with_paid_contribution(client, db_session)
+    org, group, headers = await _setup_group_without_settlement(client, db_session)
 
     resp = await client.post(
         f"/groups/{group.id}/settlement-account",
@@ -301,6 +321,17 @@ async def test_payout_request_within_balance_succeeds(client, db_session):
     assert balance.json()["data"]["available_balance"] == "500.00"
 
 
+@pytest.mark.skipif(
+    not USE_POSTGRES,
+    reason=(
+        "Genuinely exercises row-level locking (SELECT ... FOR UPDATE) on the "
+        "available-balance check -- SQLite doesn't serialize concurrent writers "
+        "the same way Postgres does, so this races unreliably there (confirmed: "
+        "both requests can read the same pre-commit balance and both succeed). "
+        "Passes cleanly under USE_POSTGRES=1, which is what actually proves the "
+        "guarantee this test exists for."
+    ),
+)
 async def test_two_simultaneous_payout_requests_constrained_by_balance(client, db_session):
     org, group, headers, purse_id = await _setup_purse_with_paid_contribution(client, db_session, collected="2500.00")
 
@@ -322,7 +353,6 @@ async def test_two_simultaneous_payout_requests_constrained_by_balance(client, d
 
 async def test_payout_approve_initiates_transfer_and_double_approve_conflicts(client, db_session):
     org, group, headers, purse_id = await _setup_purse_with_paid_contribution(client, db_session, collected="2500.00")
-    await _register_settlement_account(client, group.id, headers)
 
     create = await client.post(
         "/payouts", json={"group_id": str(group.id), "purse_id": purse_id, "amount": "2000.00"}, headers=headers
@@ -364,7 +394,6 @@ async def test_payout_reject_has_no_balance_impact(client, db_session):
 
 async def test_transfer_webhook_success_completes_payout(client, db_session):
     org, group, headers, purse_id = await _setup_purse_with_paid_contribution(client, db_session, collected="2500.00")
-    await _register_settlement_account(client, group.id, headers)
 
     create = await client.post(
         "/payouts", json={"group_id": str(group.id), "purse_id": purse_id, "amount": "2000.00"}, headers=headers
@@ -400,7 +429,6 @@ async def test_transfer_webhook_success_completes_payout(client, db_session):
 
 async def test_transfer_webhook_failure_leaves_balance_unchanged_and_retriable(client, db_session):
     org, group, headers, purse_id = await _setup_purse_with_paid_contribution(client, db_session, collected="2500.00")
-    await _register_settlement_account(client, group.id, headers)
 
     create = await client.post(
         "/payouts", json={"group_id": str(group.id), "purse_id": purse_id, "amount": "2000.00"}, headers=headers
@@ -454,7 +482,6 @@ async def test_transfer_webhook_failure_leaves_balance_unchanged_and_retriable(c
 
 async def test_payout_transfer_initiation_failure_marks_payout_failed(client, db_session):
     org, group, headers, purse_id = await _setup_purse_with_paid_contribution(client, db_session, collected="2500.00")
-    await _register_settlement_account(client, group.id, headers)
     _state["monnify"].transfer_should_fail = True
 
     create = await client.post(
@@ -597,7 +624,7 @@ async def test_settlement_direct_save_creates_sub_account_and_sets_mode(client, 
 async def test_settlement_direct_save_rejects_name_mismatch(client, db_session):
     """No override path in either mode -- a mismatch blocks saving outright,
     the same as custodian mode."""
-    org, group, headers, purse_id = await _setup_purse_with_paid_contribution(client, db_session)
+    org, group, headers = await _setup_group_without_settlement(client, db_session)
 
     resp = await client.post(
         f"/groups/{group.id}/settlement-account/direct",
@@ -673,12 +700,22 @@ async def test_custodian_mode_invoice_has_no_split_config(client, db_session):
 
 
 async def test_direct_mode_invoice_has_split_config(client, db_session):
+    """Specifically Monnify's income_split_config shape -- PlatformSettings.
+    active_payment_provider defaults to "paystack" now, so this must opt
+    into Monnify explicitly rather than rely on the default (Paystack
+    routes the split via sub_account_code/platform_fee_percent instead,
+    see ContributionService.generate_invoice)."""
     org, group, headers, member_headers, contribution_id = await _setup_purse_with_verified_pending_member(
         client, db_session, email="direct-rep@example.com"
     )
     switch = await client.post(
         f"/groups/{group.id}/settlement-account/direct",
-        json={"bank_code": "058", "account_number": "0123456789", "confirmed_account_name": "Default Resolved Name"},
+        json={
+            "bank_code": "058",
+            "account_number": "0123456789",
+            "confirmed_account_name": "Default Resolved Name",
+            "payment_provider": "monnify",
+        },
         headers=headers,
     )
     assert switch.status_code == 201, switch.text
@@ -714,7 +751,12 @@ async def test_direct_mode_invoice_locks_in_platform_fee_percent_at_generation(c
     )
     switch = await client.post(
         f"/groups/{group.id}/settlement-account/direct",
-        json={"bank_code": "058", "account_number": "0123456789", "confirmed_account_name": "Default Resolved Name"},
+        json={
+            "bank_code": "058",
+            "account_number": "0123456789",
+            "confirmed_account_name": "Default Resolved Name",
+            "payment_provider": "monnify",  # checks Monnify's income_split_config shape below
+        },
         headers=headers,
     )
     assert switch.status_code == 201, switch.text
@@ -752,7 +794,12 @@ async def test_direct_mode_new_invoice_after_expiry_uses_current_platform_fee_pe
     )
     switch = await client.post(
         f"/groups/{group.id}/settlement-account/direct",
-        json={"bank_code": "058", "account_number": "0123456789", "confirmed_account_name": "Default Resolved Name"},
+        json={
+            "bank_code": "058",
+            "account_number": "0123456789",
+            "confirmed_account_name": "Default Resolved Name",
+            "payment_provider": "monnify",  # checks Monnify's income_split_config shape below
+        },
         headers=headers,
     )
     assert switch.status_code == 201, switch.text
@@ -784,7 +831,6 @@ async def test_direct_mode_new_invoice_after_expiry_uses_current_platform_fee_pe
 
 async def test_switch_custodian_to_direct_blocked_with_outstanding_balance(client, db_session):
     org, group, headers, purse_id = await _setup_purse_with_paid_contribution(client, db_session, collected="2500.00")
-    await _register_settlement_account(client, group.id, headers)
 
     resp = await client.patch(
         f"/groups/{group.id}/settlement-account/mode", json={"new_mode": "direct"}, headers=headers
@@ -799,7 +845,6 @@ async def test_switch_custodian_to_direct_blocked_with_outstanding_balance(clien
 
 async def test_switch_custodian_to_direct_succeeds_once_balance_is_paid_out(client, db_session):
     org, group, headers, purse_id = await _setup_purse_with_paid_contribution(client, db_session, collected="2500.00")
-    await _register_settlement_account(client, group.id, headers)
 
     payout = await client.post(
         "/payouts", json={"group_id": str(group.id), "purse_id": purse_id, "amount": "2500.00"}, headers=headers
@@ -899,13 +944,17 @@ async def test_custodian_save_rejected_when_kill_switch_off(client, db_session):
     options = await client.get(f"/groups/{group.id}/settlement-options", headers=headers)
     assert options.json()["data"]["custodian_mode_enabled"] is False
 
+    # The generic save endpoint always delegates to save_direct() now --
+    # see SettlementService.save's own docstring ("Direct mode is the
+    # sole settlement model") -- so it's unaffected by the custodian kill
+    # switch too, exactly like the explicit /direct endpoint below.
     save = await client.post(
         f"/groups/{group.id}/settlement-account",
         json={"bank_code": "058", "account_number": "0123456789", "confirmed_account_name": "Default Resolved Name"},
         headers=headers,
     )
-    assert save.status_code == 403
-    assert save.json()["error"]["code"] == "custodian_mode_disabled"
+    assert save.status_code == 201, save.text
+    assert save.json()["data"]["settlement_mode"] == "direct"
 
     # Direct mode is entirely unaffected -- it's the only mode reachable
     # while the switch is off.

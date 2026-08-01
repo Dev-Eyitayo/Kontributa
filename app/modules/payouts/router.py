@@ -11,7 +11,7 @@ from app.core.exceptions import BusinessRuleError, ForbiddenError
 from app.core.response import StandardResponse, success_response
 from app.modules.auth.models import User
 from app.modules.group_admins.service import GroupAdminService
-from app.modules.notifications.service import SendByteClient, get_sendbyte_client
+from app.modules.notifications.service import EmailClient, get_email_client
 from app.modules.payments.service import MonnifyClient, get_monnify_client
 from app.modules.payouts.models import Payout
 from app.modules.payouts.schemas import (
@@ -134,13 +134,13 @@ async def approve_payout(
     db: AsyncSession = Depends(get_db),
     service: PayoutService = Depends(get_payout_service),
     monnify: MonnifyClient = Depends(get_monnify_client),
-    sendbyte: SendByteClient = Depends(get_sendbyte_client),
+    email_client: EmailClient = Depends(get_email_client),
 ) -> JSONResponse:
     payout = await service.get_by_id(payout_id)
     payout = await service.approve_only(payout, current_user.id)
 
     session_factory = async_sessionmaker(bind=db.bind, expire_on_commit=False)
-    background_tasks.add_task(initiate_transfer_for_payout, payout.id, session_factory, monnify, sendbyte)
+    background_tasks.add_task(initiate_transfer_for_payout, payout.id, session_factory, monnify, email_client)
 
     return success_response(
         {"id": str(payout.id), "status": payout.status.value, "approved_by": str(payout.approved_by)}

@@ -24,8 +24,20 @@ def _compile_uuid_sqlite(type_, compiler, **kw):
 from app.core.config import settings
 from app.core.db import Base, get_db
 from app.core.redis import get_redis
-from app.core.security import hash_password
+from app.core.security import hash_password, pwd_context
 from app.main import app
+
+# bcrypt's cost factor is deliberately expensive (production default: 12
+# rounds) -- correct for real passwords, but every register/login flow in
+# this suite pays that cost for throwaway test credentials nobody needs
+# protected, and it's the single largest driver of this suite's runtime
+# (measured on this machine: ~1.4s per hash at 12 rounds vs. ~0.01s at 4).
+# `pwd_context` is the same module-level singleton app/core/security.py's
+# hash_password()/verify_password() always call through, so reconfiguring
+# it here (test-process-only, never touches app/core/security.py itself)
+# lowers the cost for every test in the session without changing any
+# production/dev default.
+pwd_context.update(bcrypt__rounds=4)
 from app.modules.payments.schemas import (
     MonnifyAccountName,
     MonnifyInvoice,
@@ -34,7 +46,7 @@ from app.modules.payments.schemas import (
     MonnifyTransferResult,
 )
 from app.modules.payments.service import MonnifyError, get_monnify_client
-from app.modules.notifications.service import SendByteError, get_sendbyte_client
+from app.modules.notifications.service import EmailServiceError, get_email_client, get_sendbyte_client
 from app.modules.realtime.service import RealtimeService, get_realtime_service
 
 # Ensure every module's models are registered on Base.metadata before create_all.
@@ -51,7 +63,7 @@ from app.modules.organizations.models import Group, Organization, OrganizationTy
 from app.modules.payouts import models as _payout_models  # noqa: F401
 from app.modules.platform_settings.models import PlatformSettings
 from app.modules.purses import models as _purse_models  # noqa: F401
-from app.modules.settlement import models as _settlement_models  # noqa: F401
+from app.modules.settlement.models import SettlementAccount, SettlementMode
 from app.modules.webhooks import models as _webhook_models  # noqa: F401
 
 
@@ -139,9 +151,18 @@ _state: dict = {}
 
 
 class FakeMonnifyClient:
-    """Stands in for the real Monnify API in tests -- no network access."""
+    """Stands in for the real Monnify API in tests -- no network access.
+
+    Also stands in for Paystack: since PlatformSettings.active_payment_provider
+    now defaults to "paystack", most settlement/invoice code paths resolve
+    their client via get_payment_provider(name) (a plain function call, not
+    a FastAPI dependency) rather than the get_monnify_client() DI hook this
+    class was originally built for -- see the get_payment_provider monkeypatch
+    below. provider_name is a plain mutable attribute (not a real class's
+    read-only property) so that patch can stamp it per call."""
 
     def __init__(self):
+        self.provider_name = "monnify"
         self.created_invoices: list[str] = []
         # Keyed by invoice_reference so a test can assert whether *this
         # specific* invoice got a split config, not just "the last one".
@@ -162,6 +183,7 @@ class FakeMonnifyClient:
         description,
         expires_at,
         income_split_config=None,
+        **kwargs,  # sub_account_code / platform_fee_percent -- unused, the real interface accepts them
     ) -> MonnifyInvoice:
         self.created_invoices.append(invoice_reference)
         self.invoice_split_configs[invoice_reference] = income_split_config
@@ -208,6 +230,9 @@ class FakeMonnifyClient:
     async def list_banks(self) -> list[dict]:
         return [{"bank_code": "058", "bank_name": "Guaranty Trust Bank"}, {"bank_code": "011", "bank_name": "First Bank"}]
 
+    def verify_webhook_signature(self, raw_body: bytes, signature: str) -> bool:
+        return True
+
     async def initiate_single_transfer(
         self, reference, amount, bank_code, account_number, account_name, narration
     ) -> MonnifyTransferResult:
@@ -225,7 +250,7 @@ class FakeMonnifyClient:
         return MonnifyTransferResult(reference=reference, status="PENDING")
 
 
-class FakeSendByteClient:
+class FakeEmailClient:
     """Stands in for the real SendByte API in tests -- no network access."""
 
     def __init__(self):
@@ -234,7 +259,7 @@ class FakeSendByteClient:
 
     async def send(self, to_email: str, to_name: str, subject: str, html: str) -> str:
         if self.should_fail:
-            raise SendByteError("simulated SendByte send failure")
+            raise EmailServiceError("simulated SendByte send failure")
         self.sent.append({"to_email": to_email, "to_name": to_name, "subject": subject, "html": html})
         return f"fake-message-{len(self.sent)}"
 
@@ -271,14 +296,50 @@ async def db_setup():
     fake_redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
 
     fake_monnify = FakeMonnifyClient()
-    fake_sendbyte = FakeSendByteClient()
+    fake_sendbyte = FakeEmailClient()
     fake_realtime = FakeRealtimeService()
+
+    # get_payment_provider(name) -- unlike get_monnify_client, which is a
+    # FastAPI dependency the override above already intercepts -- is a
+    # plain function that settlement/contributions/jobs service code calls
+    # directly (via a fresh `from app.modules.payments.service import
+    # get_payment_provider` inside each function body) whenever it needs
+    # to resolve "whichever provider is currently active"
+    # (PlatformSettings.active_payment_provider, "paystack" by default).
+    # Left unpatched, that path constructs a *real* MonnifyClient/
+    # PaystackClient and hits the actual sandbox over the network --
+    # slow, flaky, and dependent on live credentials. Patching the
+    # module attribute directly (not e.g. monkeypatch.setattr, since this
+    # needs to live for the whole session, not one test) is still seen by
+    # every one of those local `from ... import get_payment_provider`
+    # call sites, since each one re-reads the module's current attribute
+    # at call time rather than binding it once at import time.
+    def _fake_get_payment_provider(provider_name: str = "paystack"):
+        fake_monnify.provider_name = provider_name
+        return fake_monnify
+
+    import app.modules.payments.service as _payments_service_module
+
+    _payments_service_module.get_payment_provider = _fake_get_payment_provider
+
+    # app/modules/banks/router.py is the one exception to "every call site
+    # re-imports locally" above -- it does `from
+    # app.modules.payments.service import get_payment_provider` at its own
+    # module's top level, at app-import time (long before this fixture
+    # ever runs), binding its *own* module-level name to the original
+    # function object. Patching payments.service's attribute afterward
+    # doesn't reach that already-bound name, so GET /banks would still
+    # hit a real provider unless banks.router's own copy is patched too.
+    import app.modules.banks.router as _banks_router_module
+
+    _banks_router_module.get_payment_provider = _fake_get_payment_provider
 
     _state["engine"] = engine
     _state["session_local"] = session_local
     _state["redis"] = fake_redis
     _state["monnify"] = fake_monnify
     _state["sendbyte"] = fake_sendbyte
+    _state["email_client"] = fake_sendbyte
     _state["realtime"] = fake_realtime
 
     async def _override_get_db():
@@ -291,7 +352,7 @@ async def db_setup():
     def _override_get_monnify_client():
         return fake_monnify
 
-    def _override_get_sendbyte_client():
+    def _override_get_email_client():
         return fake_sendbyte
 
     def _override_get_realtime_service():
@@ -300,7 +361,8 @@ async def db_setup():
     app.dependency_overrides[get_db] = _override_get_db
     app.dependency_overrides[get_redis] = _override_get_redis
     app.dependency_overrides[get_monnify_client] = _override_get_monnify_client
-    app.dependency_overrides[get_sendbyte_client] = _override_get_sendbyte_client
+    app.dependency_overrides[get_email_client] = _override_get_email_client
+    app.dependency_overrides[get_sendbyte_client] = _override_get_email_client
     app.dependency_overrides[get_realtime_service] = _override_get_realtime_service
 
     yield
@@ -323,6 +385,7 @@ async def db_setup():
     app.dependency_overrides.pop(get_db, None)
     app.dependency_overrides.pop(get_redis, None)
     app.dependency_overrides.pop(get_monnify_client, None)
+    app.dependency_overrides.pop(get_email_client, None)
     app.dependency_overrides.pop(get_sendbyte_client, None)
     app.dependency_overrides.pop(get_realtime_service, None)
 
@@ -432,6 +495,59 @@ async def create_platform_admin(db_session, email: str = "admin@example.com") ->
     return admin
 
 
+async def create_settlement_account(
+    db_session,
+    group: Group,
+    *,
+    mode: SettlementMode = SettlementMode.CUSTODIAN,
+    bank_code: str = "044",
+    bank_name: str = "Access Bank",
+    account_number: str = "0000000000",
+    account_name: str = "Test Settlement Account",
+    payment_provider: str = "paystack",
+) -> SettlementAccount:
+    """A direct DB insert, not a call through POST /groups/{id}/settlement-
+    account -- that real endpoint calls out to Monnify/Paystack's actual
+    sandbox APIs (account-name verification, sub-account creation), which
+    is slow and network-dependent and not what most tests further down
+    the funnel (purse creation, invoice generation, payouts) are actually
+    testing. Tests that specifically exercise the save/lookup/mode-switch
+    flow itself still go through the real endpoint -- this is only for
+    "a settlement account already exists" as a precondition.
+
+    mode defaults to CUSTODIAN, not the product's own current default of
+    DIRECT (see SettlementAccount.settlement_mode) -- matching
+    default_platform_settings' own established baseline just above,
+    since this suite predates the Direct-mode-only product direction and
+    still overwhelmingly assumes "a group with a settlement account has
+    its contributions held, then paid out on request." Pass
+    mode=SettlementMode.DIRECT for a test that specifically wants the
+    split-at-payment-time behavior instead."""
+    from app.modules.group_admins.models import GroupAdmin
+    from sqlalchemy import select
+
+    admin = (
+        await db_session.execute(select(GroupAdmin).where(GroupAdmin.group_id == group.id).limit(1))
+    ).scalar_one()
+
+    account = SettlementAccount(
+        group_id=group.id,
+        bank_code=bank_code,
+        bank_name=bank_name,
+        account_number=account_number,
+        account_name=account_name,
+        account_name_verified=True,
+        created_by_group_admin_id=admin.id,
+        settlement_mode=mode,
+        direct_sub_account_code=f"SUB_{group.id.hex[:8]}" if mode == SettlementMode.DIRECT else None,
+        payment_provider=payment_provider,
+    )
+    db_session.add(account)
+    await db_session.commit()
+    await db_session.refresh(account)
+    return account
+
+
 async def onboard_group_admin(
     client,
     db_session,
@@ -439,12 +555,27 @@ async def onboard_group_admin(
     headers: dict,
     group_name: str = "Onboarded Group",
     cohort: str | None = None,
+    with_settlement: bool = True,
+    settlement_mode: SettlementMode = SettlementMode.CUSTODIAN,
 ) -> Group:
     """Always creates a brand-new Group via POST /group-admins/onboard --
     there is no "pick an existing group_id" path -- so this fetches and
     returns the actual Group the call created. A duplicate group_name
     within the same org is fine: the backend auto-dedupes the short_code
-    on collision."""
+    on collision.
+
+    with_settlement=True (the default) also provisions a settlement
+    account via create_settlement_account() -- POST /purses now requires
+    one to exist (settlement_account_required), and the overwhelming
+    majority of callers of this helper just want a working group ready
+    to take purses/contributions, not to test settlement-account setup
+    itself. Defaults to CUSTODIAN mode, matching this suite's established
+    baseline (see create_settlement_account's own docstring) -- pass
+    settlement_mode=SettlementMode.DIRECT for a test that specifically
+    wants Direct-mode behavior. Pass with_settlement=False for a test
+    that specifically exercises the settlement-account save/lookup/
+    mode-switch endpoints, where a pre-existing account would interfere
+    with "starts from nothing" assertions."""
     from uuid import UUID
 
     payload: dict = {"organization_id": str(org.id), "new_group_name": group_name}
@@ -454,4 +585,6 @@ async def onboard_group_admin(
     assert resp.status_code == 201, resp.text
     group = await db_session.get(Group, UUID(resp.json()["data"]["group_id"]))
     assert group is not None
+    if with_settlement:
+        await create_settlement_account(db_session, group, mode=settlement_mode)
     return group

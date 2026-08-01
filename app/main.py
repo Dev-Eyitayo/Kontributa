@@ -12,6 +12,7 @@ from app.core.csrf import CSRFMiddleware
 from app.core.exceptions import AppException
 from app.core.logging import configure_logging
 from app.core.response import error_response
+from app.modules.admin.analytics_router import router as admin_analytics_router
 from app.modules.admin.router import router as admin_router
 from app.modules.audit.router import router as audit_router
 from app.modules.auth.router import router as auth_router
@@ -121,6 +122,7 @@ app.include_router(purses_router, prefix=API_V1_PREFIX)
 app.include_router(notifications_router, prefix=API_V1_PREFIX)
 app.include_router(contributions_router, prefix=API_V1_PREFIX)
 app.include_router(admin_router, prefix=API_V1_PREFIX)
+app.include_router(admin_analytics_router, prefix=API_V1_PREFIX)
 app.include_router(settlement_router, prefix=API_V1_PREFIX)
 app.include_router(payouts_router, prefix=API_V1_PREFIX)
 app.include_router(audit_router, prefix=API_V1_PREFIX)

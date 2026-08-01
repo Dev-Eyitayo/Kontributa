@@ -5,7 +5,7 @@ inserting the self-referential Member row straight via the DB session,
 since the API itself now refuses to create one."""
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from sqlalchemy import select
 
@@ -44,7 +44,7 @@ async def _insert_self_referential_member(db_session, user_id: str, group, cohor
     this outright."""
     member = Member(
         id=uuid4(),
-        user_id=user_id,
+        user_id=UUID(user_id),
         group_id=group.id,
         cohort=cohort,
         verification_status=VerificationStatus.VERIFIED,

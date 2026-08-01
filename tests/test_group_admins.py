@@ -5,7 +5,7 @@ from sqlalchemy import select, update
 
 from app.modules.contributions.models import Contribution, ContributionStatus
 from app.modules.members.models import Member
-from tests.conftest import create_org_and_group, find_redis_token, onboard_group_admin
+from tests.conftest import create_org_and_group, create_settlement_account, find_redis_token, onboard_group_admin
 from tests.test_purses import _invite_and_join_member, _purse_payload
 
 
@@ -109,9 +109,15 @@ async def test_me_total_collected_across_open_purses(client, db_session):
     # switch to it) that used to crash the dashboard.
     me = await client.get(f"/group-admins/me?group_id={group_id}", headers=headers)
     assert me.status_code == 200
-    # Unpadded "0", not "0.00" -- same convention as collected_totals_for_purses'
-    # own zero default; formatMoney on the frontend handles either fine.
-    assert me.json()["data"]["total_collected_across_open_purses"] == "0"
+    assert me.json()["data"]["total_collected_across_open_purses"] == "0.00"
+
+    # POST /purses now requires a settlement account to already exist --
+    # this test onboards directly (not via the onboard_group_admin helper,
+    # which would auto-provision one), so it needs its own.
+    from app.modules.organizations.models import Group as _Group
+
+    group_row = await db_session.get(_Group, uuid.UUID(group_id))
+    await create_settlement_account(db_session, group_row)
 
     await _invite_and_join_member(client, headers, group_id, email="payer@example.com")
 
@@ -257,6 +263,14 @@ async def test_update_group_sets_cohort_retroactive_for_members_not_purses(clien
         headers=headers,
     )
     group_id = onboard.json()["data"]["group_id"]
+
+    # POST /purses now requires a settlement account to already exist --
+    # this test onboards directly (not via the onboard_group_admin helper,
+    # which would auto-provision one), so it needs its own.
+    from app.modules.organizations.models import Group as _Group
+
+    group_row = await db_session.get(_Group, uuid.UUID(group_id))
+    await create_settlement_account(db_session, group_row)
 
     # No cohort set yet -- a member who joins now gets none.
     invite_before = await client.post(

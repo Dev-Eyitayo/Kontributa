@@ -25,7 +25,7 @@ from app.modules.contributions.service import ContributionService, compute_displ
 from app.modules.group_admins.service import GroupAdminService
 from app.modules.members.models import Member
 from app.modules.members.service import MemberService
-from app.modules.notifications.service import NotificationService, SendByteClient, get_sendbyte_client
+from app.modules.notifications.service import NotificationService, EmailClient, get_email_client
 from app.modules.payments.service import MonnifyClient, get_monnify_client
 from app.modules.platform_settings.service import PlatformSettingsService
 from app.modules.purses.models import Purse
@@ -112,7 +112,7 @@ async def generate_invoice(
     db: AsyncSession = Depends(get_db),
     service: ContributionService = Depends(get_contribution_service),
     monnify: MonnifyClient = Depends(get_monnify_client),
-    sendbyte: SendByteClient = Depends(get_sendbyte_client),
+    email_client: EmailClient = Depends(get_email_client),
     platform_settings: PlatformSettingsService = Depends(get_platform_settings_service),
 ) -> JSONResponse:
     contribution = await service.get_by_id(contribution_id)
@@ -122,7 +122,7 @@ async def generate_invoice(
     if not owner_user.is_verified:
         raise ForbiddenError("email verification required before paying", code="email_not_verified")
 
-    notifications = NotificationService(db, sendbyte)
+    notifications = NotificationService(db, email_client)
     contribution = await service.generate_invoice(
         contribution, monnify, owner_user, purse, notifications, platform_settings
     )

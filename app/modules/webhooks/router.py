@@ -10,7 +10,7 @@ from app.core.config import settings
 from app.core.db import get_db
 from app.core.exceptions import AuthError
 from app.core.response import StandardResponse, success_response
-from app.modules.notifications.service import SendByteClient, get_sendbyte_client
+from app.modules.notifications.service import EmailClient, get_email_client
 from app.modules.payments.service import MonnifyClient
 from app.modules.realtime.service import RealtimeService, get_realtime_service
 from app.modules.webhooks.schemas import ReceivedResponse
@@ -29,7 +29,7 @@ async def monnify_webhook(
     request: Request,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
-    sendbyte: SendByteClient = Depends(get_sendbyte_client),
+    email_client: EmailClient = Depends(get_email_client),
     realtime: RealtimeService = Depends(get_realtime_service),
 ) -> JSONResponse:
     raw_body = await request.body()
@@ -56,7 +56,7 @@ async def monnify_webhook(
         if event_type in ("SUCCESSFUL_SETTLEMENT", "SETTLEMENT_COMPLETED"):
             background_tasks.add_task(process_settlement_webhook_event, event.id, session_factory, payload)
         else:
-            background_tasks.add_task(process_collection_webhook_event, event.id, session_factory, sendbyte, realtime)
+            background_tasks.add_task(process_collection_webhook_event, event.id, session_factory, email_client, realtime)
 
     return success_response({"received": True}, status_code=202)
 
@@ -66,7 +66,7 @@ async def monnify_transfer_webhook(
     request: Request,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
-    sendbyte: SendByteClient = Depends(get_sendbyte_client),
+    email_client: EmailClient = Depends(get_email_client),
 ) -> JSONResponse:
     raw_body = await request.body()
     signature = request.headers.get("monnify-signature", "")
@@ -85,7 +85,7 @@ async def monnify_transfer_webhook(
 
     if is_new:
         session_factory = async_sessionmaker(bind=db.bind, expire_on_commit=False)
-        background_tasks.add_task(process_transfer_webhook_event, event.id, session_factory, sendbyte)
+        background_tasks.add_task(process_transfer_webhook_event, event.id, session_factory, email_client)
 
     return success_response({"received": True}, status_code=202)
 
@@ -95,7 +95,7 @@ async def paystack_webhook(
     request: Request,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
-    sendbyte: SendByteClient = Depends(get_sendbyte_client),
+    email_client: EmailClient = Depends(get_email_client),
     realtime: RealtimeService = Depends(get_realtime_service),
 ) -> JSONResponse:
     from app.modules.payments.paystack import PaystackClient
@@ -117,25 +117,9 @@ async def paystack_webhook(
 
     if is_new:
         session_factory = async_sessionmaker(bind=db.bind, expire_on_commit=False)
-        if event_type in ("subaccount.settlement", "settlement.success"):
-            subaccount = event_data.get("subaccount", {})
-            sub_code = subaccount.get("subaccount_code") if isinstance(subaccount, dict) else str(subaccount or "")
-            settlement_payload = {
-                "eventType": "SUCCESSFUL_SETTLEMENT",
-                "eventData": {
-                    "settlementReference": str(event_data.get("id") or provider_event_id),
-                    "subAccountCode": sub_code,
-                    "amount": float(Decimal(str(event_data.get("total_amount") or event_data.get("amount", 0))) / Decimal("100")),
-                    "fee": float(Decimal(str(event_data.get("total_fees") or event_data.get("fee", 0))) / Decimal("100")),
-                    "settledAmount": float(Decimal(str(event_data.get("settled_amount") or event_data.get("amount", 0))) / Decimal("100")),
-                    "status": "COMPLETED",
-                    "settlementTime": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f"),
-                },
-            }
-            background_tasks.add_task(process_settlement_webhook_event, event.id, session_factory, settlement_payload)
-        elif event_type == "charge.success":
-            background_tasks.add_task(process_collection_webhook_event, event.id, session_factory, sendbyte, realtime)
+        if event_type == "charge.success":
+            background_tasks.add_task(process_collection_webhook_event, event.id, session_factory, email_client, realtime)
         elif event_type in ("transfer.success", "transfer.failed", "transfer.reversed"):
-            background_tasks.add_task(process_transfer_webhook_event, event.id, session_factory, sendbyte)
+            background_tasks.add_task(process_transfer_webhook_event, event.id, session_factory, email_client)
 
     return success_response({"received": True}, status_code=202)

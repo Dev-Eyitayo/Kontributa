@@ -136,7 +136,12 @@ class SettlementService:
         return resolved
 
     async def _assert_custodian_mode_enabled(self, platform_settings: PlatformSettingsService) -> None:
-        pass
+        settings_row = await platform_settings.get_or_create()
+        if not settings_row.custodian_mode_enabled:
+            raise ForbiddenError(
+                "Custodian mode is disabled platform-wide -- ask a platform admin to enable it first.",
+                code="custodian_mode_disabled",
+            )
 
     async def save(
         self,

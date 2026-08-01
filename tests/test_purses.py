@@ -207,12 +207,16 @@ async def test_editing_amount_only_updates_pending_contributions(client, db_sess
     paid_member_id = contributions_before.json()["data"]["items"][0]["member_id"]
 
     # Directly flip one contribution to paid via the DB, since Monnify integration doesn't exist yet.
+    from uuid import UUID
+
     from sqlalchemy import select
 
     from app.modules.contributions.models import Contribution, ContributionStatus
 
     result = await db_session.execute(
-        select(Contribution).where(Contribution.member_id == paid_member_id, Contribution.purse_id == purse_id)
+        select(Contribution).where(
+            Contribution.member_id == UUID(paid_member_id), Contribution.purse_id == UUID(purse_id)
+        )
     )
     contribution = result.scalar_one()
     contribution.status = ContributionStatus.PAID

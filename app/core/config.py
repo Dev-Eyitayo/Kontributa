@@ -83,14 +83,29 @@ class Settings(BaseSettings):
 
     ABLY_API_KEY: str = ""
 
-    SENDBYTE_BASE_URL: str = "https://api.sendbyte.africa"
-    SENDBYTE_API_KEY: str = ""
-    SENDBYTE_FROM_EMAIL: str = "noreply@kontributa.app"
-    SENDBYTE_FROM_NAME: str = "Kontributa"
-
-    # Global kill switch for the /purses/{id}/remind feature
+    EMAIL_BASE_URL: str = "https://api.senviok.live"
+    EMAIL_API_KEY: str = ""
+    EMAIL_FROM_EMAIL: str = "noreply@kontributa.app"
+    EMAIL_FROM_NAME: str = "Kontributa"
     REMINDERS_ENABLED: bool = True
     REMINDER_MIN_INTERVAL_DAYS: int = 7
+
+    # Backward compatibility aliases for legacy SENDBYTE_* settings
+    @property
+    def SENDBYTE_BASE_URL(self) -> str:
+        return self.EMAIL_BASE_URL
+
+    @property
+    def SENDBYTE_API_KEY(self) -> str:
+        return self.EMAIL_API_KEY
+
+    @property
+    def SENDBYTE_FROM_EMAIL(self) -> str:
+        return self.EMAIL_FROM_EMAIL
+
+    @property
+    def SENDBYTE_FROM_NAME(self) -> str:
+        return self.EMAIL_FROM_NAME
 
     RATE_LIMIT_REGISTER_PER_HOUR: int = 10
     RATE_LIMIT_FORGOT_PASSWORD_PER_HOUR: int = 5

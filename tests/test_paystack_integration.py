@@ -24,25 +24,27 @@ async def test_paystack_signature_verification():
 async def test_platform_settings_gateway_toggles(client: AsyncClient, db_session):
     admin_headers = await _admin_platform_headers(db_session)
 
-    # Initial settings
+    # Initial settings -- both gateways on, Paystack active by default
+    # (see PlatformSettings and migration f92c8a5b9903, which flipped the
+    # default from Monnify).
     resp = await client.get("/admin/settings", headers=admin_headers)
     assert resp.status_code == 200
     data = resp.json()["data"]
     assert data["monnify_enabled"] is True
-    assert data["paystack_enabled"] is False
-    assert data["active_payment_provider"] == "monnify"
+    assert data["paystack_enabled"] is True
+    assert data["active_payment_provider"] == "paystack"
 
-    # Enable Paystack and set active provider to Paystack
+    # Switch the active provider back to Monnify.
     patch_resp = await client.patch(
         "/admin/settings",
-        json={"paystack_enabled": True, "active_payment_provider": "paystack"},
+        json={"active_payment_provider": "monnify"},
         headers=admin_headers,
     )
     assert patch_resp.status_code == 200
     updated_data = patch_resp.json()["data"]
     assert updated_data["monnify_enabled"] is True
     assert updated_data["paystack_enabled"] is True
-    assert updated_data["active_payment_provider"] == "paystack"
+    assert updated_data["active_payment_provider"] == "monnify"
 
 
 @pytest.mark.asyncio

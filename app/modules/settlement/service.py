@@ -201,6 +201,7 @@ class SettlementService:
         sub_account = await provider.create_sub_account(
             bank_code=resolved.bank_code,
             account_number=resolved.account_number,
+            business_name=resolved.account_name,
             email=admin_user.email if admin_user else "",
             split_percentage=Decimal("100") - platform_fee_percent,
         )

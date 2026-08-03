@@ -597,30 +597,6 @@ class ContributionService:
         expires_at = now + timedelta(minutes=settings.MONNIFY_INVOICE_EXPIRY_MINUTES)
         invoice_reference = f"{contribution.id}-{uuid4().hex[:8]}"
 
-        # Direct-mode groups route their share straight to their own
-        # Monnify sub-account via an income split on this specific invoice;
-        # custodian-mode groups (or a direct-mode group whose sub-account
-        # setup is somehow missing) get exactly today's behavior. Either
-        # way, payment confirmation below is still detected off our own
-        # invoice_reference -- this only changes where the money settles.
-        #
-        # splitPercentage is the field that actually routes a share of the
-        # transaction to the sub-account (confirmed against Monnify's own
-        # Transaction Splitting docs) -- feePercentage/feeBearer instead
-        # govern who bears *Monnify's own* processing fee, which stays on
-        # Kontributa's main account by default (confirmed with Monnify
-        # support: their fee is charged once, before the split, never a
-        # second time on settlement), so feeBearer is false and
-        # feePercentage is 0 for the sub-account.
-        #
-        # Kontributa's own cut is expressed as the *other* side of this same
-        # split -- the group's sub-account gets (100 - platform_fee_percent)%
-        # of the transaction, leaving the remainder on Kontributa's main
-        # account -- rather than a separate deduction, since Direct mode has
-        # no held balance to deduct from. Read fresh right here, at
-        # generation time, and stored on the contribution so an invoice
-        # already generated (and possibly already paid) never has its split
-        # retroactively changed by a later platform_fee_percent edit.
         income_split_config = None
         platform_fee_percent_applied = None
         settings_row = await (platform_settings or PlatformSettingsService(self.db)).get_or_create()
@@ -642,6 +618,7 @@ class ContributionService:
                         bank_code=settlement.bank_code,
                         account_number=settlement.account_number,
                         email=owner_user.email,
+                        business_name=settlement.account_name,
                         split_percentage=Decimal("100") - settings_row.platform_fee_percent,
                     )
                     settlement.direct_sub_account_code = new_sub_acc.sub_account_code

@@ -158,6 +158,9 @@ class PurseDetailMemberOut(PurseOut):
     # Display-layer only -- see compute_display_status's docstring.
     # contribution_status above stays the real, unmassaged value.
     display_status: str
+    paid_count: int
+    total_count: int
+
 
 
 class PurseUpdateResponse(BaseModel):

@@ -12,20 +12,31 @@
 <td align="center" style="padding:40px 16px;">
 <table role="presentation" width="480" cellpadding="0" cellspacing="0" style="width:480px;max-width:100%;">
 
-<!-- Wordmark, sitting directly on the page -- no dark banner. Real
-     apps built on this brand never put the logo in a colored bar; it
-     sits on the paper background exactly like this everywhere else. -->
+<!-- Dark Forest Green Header with PNG Logo Lockup -->
 <tr>
-<td style="padding:0 4px 28px;">
-<img src="{{ logo_url }}" width="150" height="45" alt="Kontributa" style="display:block;border:0;outline:none;">
+<td style="padding:0 0 20px;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#1B2811;border-radius:12px;overflow:hidden;box-shadow:0 4px 14px rgba(27,40,17,0.18);">
+<tr>
+<td style="padding:20px 24px;background:linear-gradient(135deg, #1B2811 0%, #2A3E1B 100%);">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+<tr>
+<td style="vertical-align:middle;">
+<img src="{{ header_logo_url|default('https://kontributa.online/logo/header-lockup-dark.png') }}" width="160" height="40" alt="Kontributa" style="display:block;border:0;outline:none;max-width:100%;height:auto;">
+</td>
+<td align="right" style="vertical-align:middle;">
+<span style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#A1ED63;background:rgba(161,237,99,0.12);padding:4px 10px;border-radius:999px;border:1px solid rgba(161,237,99,0.25);">
+Group Finance
+</span>
+</td>
+</tr>
+</table>
+</td>
+</tr>
+</table>
 </td>
 </tr>
 
-<!-- Content card. White-on-paper is the one case this app's own design
-     system calls for a border (see Card.tsx: background contrast alone
-     isn't quite enough there) -- plus a left accent stripe, the same
-     idiom the dashboard itself uses for a flagged/lagging/urgent item,
-     so the email's "mood" reads before a single word is read. -->
+<!-- Content card -->
 <tr>
 <td style="background-color:#ffffff;border:1px solid rgba(27,40,17,0.14);border-left:4px solid {% block accent_color %}#1B2811{% endblock %};border-radius:10px;padding:36px 32px;">
 <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#1B2811;font-size:15px;line-height:1.65;">
@@ -40,7 +51,7 @@
 <table role="presentation" cellpadding="0" cellspacing="0">
 <tr>
 <td style="padding-right:10px;vertical-align:middle;">
-<img src="{{ icon_url }}" width="16" height="16" alt="" style="display:block;border:0;outline:none;">
+<img src="{{ icon_url|default('https://kontributa.online/logo/icon-light.svg') }}" width="16" height="16" alt="" style="display:block;border:0;outline:none;">
 </td>
 <td style="vertical-align:middle;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#5B6472;font-size:12px;line-height:1.5;">
 Sent by Kontributa &mdash; automated, safe to ignore if you weren&rsquo;t expecting it.

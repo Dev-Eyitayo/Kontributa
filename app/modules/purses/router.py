@@ -64,10 +64,11 @@ def _pacing_status(status: str, deadline: datetime, paid_count: int, total_count
         return None
     if deadline.tzinfo is None:
         deadline = deadline.replace(tzinfo=timezone.utc)
-    if deadline < now:
+    end_of_deadline_day = deadline.replace(hour=23, minute=59, second=59, microsecond=999999)
+    if end_of_deadline_day < now:
         return "pending_close"
     percent_complete = (paid_count / total_count * 100) if total_count else 0.0
-    days_left = (deadline - now).total_seconds() / 86400
+    days_left = (end_of_deadline_day - now).total_seconds() / 86400
     if days_left <= LAGGING_DEADLINE_DAYS and percent_complete < LAGGING_PERCENT_THRESHOLD:
         return "lagging"
     return "on_track"
@@ -269,12 +270,16 @@ async def get_purse(
     contribution = await ContributionService(db).get_for_member(purse.id, member.id) if member else None
     if contribution is None:
         raise ForbiddenError("not eligible for this purse")
+    counts = await ContributionService(db).counts_for_purses([purse.id])
+    paid_count, total_count = counts.get(purse.id, (0, 0))
     return success_response(
         {
             **_purse_out(purse),
             "enroll_mode": purse.enroll_mode.value,
             "contribution_status": contribution.status.value,
             "display_status": compute_display_status(contribution.status.value, purse.status.value),
+            "paid_count": paid_count,
+            "total_count": total_count,
         }
     )
 

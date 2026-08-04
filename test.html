@@ -19,9 +19,10 @@
   }
   header h1 {
     margin: 0 0 6px;
-    font-size: 20px;
+    font-size: 24px;
     font-weight: 800;
-    letter-spacing: -0.01em;
+    letter-spacing: -0.02em;
+    color: #1B2811;
   }
   header p {
     margin: 0;
@@ -96,7 +97,7 @@
 <body>
 <header>
   <h1>Kontributa email templates</h1>
-  <p>Rendered from the real Jinja templates &amp; sample data -- not a mockup. Switch templates below.</p>
+  <p>Rendered with PNG logo lockup on a dark forest green header.</p>
 </header>
 <div class="tabs" id="tabs"></div>
 <div class="stage">
@@ -107,7 +108,431 @@
 </div>
 <footer>Each accent color is deliberate: lime for a confirmed/paid moment, brass for something pending, brick for a real failure.</footer>
 <script>
-  const entries = [{"id": "verify_email", "label": "Verify email", "html": "<!doctype html>\n<html>\n<head>\n<meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n<meta name=\"color-scheme\" content=\"light\">\n<title>Verify your Kontributa account</title>\n</head>\n<body style=\"margin:0;padding:0;background-color:#F4FAED;\">\n<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"background-color:#F4FAED;\">\n<tr>\n<td align=\"center\" style=\"padding:40px 16px;\">\n<table role=\"presentation\" width=\"480\" cellpadding=\"0\" cellspacing=\"0\" style=\"width:480px;max-width:100%;\">\n\n<!-- Wordmark, sitting directly on the page -- no dark banner. Real\n     apps built on this brand never put the logo in a colored bar; it\n     sits on the paper background exactly like this everywhere else. -->\n<tr>\n<td style=\"padding:0 4px 28px;\">\n<img src=\"https://kontributa.vercel.app/logo/lockup-light.svg\" width=\"150\" height=\"45\" alt=\"Kontributa\" style=\"display:block;border:0;outline:none;\">\n</td>\n</tr>\n\n<!-- Content card. White-on-paper is the one case this app's own design\n     system calls for a border (see Card.tsx: background contrast alone\n     isn't quite enough there) -- plus a left accent stripe, the same\n     idiom the dashboard itself uses for a flagged/lagging/urgent item,\n     so the email's \"mood\" reads before a single word is read. -->\n<tr>\n<td style=\"background-color:#ffffff;border:1px solid rgba(27,40,17,0.14);border-left:4px solid #A1ED63;border-radius:10px;padding:36px 32px;\">\n<div style=\"font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#1B2811;font-size:15px;line-height:1.65;\">\n\n<p style=\"margin:0 0 4px;font-size:18px;font-weight:700;color:#1B2811;\">Confirm it&rsquo;s you</p>\n<p style=\"margin:0 0 20px;\">Hi Ada, use the code below to verify your email address and finish setting up your account.</p>\n\n<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"margin:0 0 20px;\">\n<tr>\n<td align=\"center\" style=\"background-color:#F4FAED;border:1.5px dashed rgba(27,40,17,0.35);border-radius:10px;padding:20px;\">\n<span style=\"font-family:'SF Mono',SFMono-Regular,Consolas,'Liberation Mono',Menlo,monospace;font-size:28px;font-weight:700;letter-spacing:7px;color:#1B2811;\">482913</span>\n</td>\n</tr>\n</table>\n\n<p style=\"margin:0;color:#5B6472;font-size:13px;\">This code expires in 15 minutes. Didn&rsquo;t create a Kontributa account? You can ignore this email.</p>\n\n</div>\n</td>\n</tr>\n\n<!-- Footer -->\n<tr>\n<td style=\"padding:22px 4px 0;\">\n<table role=\"presentation\" cellpadding=\"0\" cellspacing=\"0\">\n<tr>\n<td style=\"padding-right:10px;vertical-align:middle;\">\n<img src=\"https://kontributa.vercel.app/logo/icon-light.svg\" width=\"16\" height=\"16\" alt=\"\" style=\"display:block;border:0;outline:none;\">\n</td>\n<td style=\"vertical-align:middle;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#5B6472;font-size:12px;line-height:1.5;\">\nSent by Kontributa &mdash; automated, safe to ignore if you weren&rsquo;t expecting it.\n</td>\n</tr>\n</table>\n</td>\n</tr>\n\n</table>\n</td>\n</tr>\n</table>\n</body>\n</html>"}, {"id": "password_reset", "label": "Password reset", "html": "<!doctype html>\n<html>\n<head>\n<meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n<meta name=\"color-scheme\" content=\"light\">\n<title>Reset your Kontributa password</title>\n</head>\n<body style=\"margin:0;padding:0;background-color:#F4FAED;\">\n<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"background-color:#F4FAED;\">\n<tr>\n<td align=\"center\" style=\"padding:40px 16px;\">\n<table role=\"presentation\" width=\"480\" cellpadding=\"0\" cellspacing=\"0\" style=\"width:480px;max-width:100%;\">\n\n<!-- Wordmark, sitting directly on the page -- no dark banner. Real\n     apps built on this brand never put the logo in a colored bar; it\n     sits on the paper background exactly like this everywhere else. -->\n<tr>\n<td style=\"padding:0 4px 28px;\">\n<img src=\"https://kontributa.vercel.app/logo/lockup-light.svg\" width=\"150\" height=\"45\" alt=\"Kontributa\" style=\"display:block;border:0;outline:none;\">\n</td>\n</tr>\n\n<!-- Content card. White-on-paper is the one case this app's own design\n     system calls for a border (see Card.tsx: background contrast alone\n     isn't quite enough there) -- plus a left accent stripe, the same\n     idiom the dashboard itself uses for a flagged/lagging/urgent item,\n     so the email's \"mood\" reads before a single word is read. -->\n<tr>\n<td style=\"background-color:#ffffff;border:1px solid rgba(27,40,17,0.14);border-left:4px solid #B8892B;border-radius:10px;padding:36px 32px;\">\n<div style=\"font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#1B2811;font-size:15px;line-height:1.65;\">\n\n<p style=\"margin:0 0 4px;font-size:18px;font-weight:700;color:#1B2811;\">Reset your password</p>\n<p style=\"margin:0 0 20px;\">Hi Ada, we received a request to reset your password. Use the code below to continue.</p>\n\n<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"margin:0 0 20px;\">\n<tr>\n<td align=\"center\" style=\"background-color:#F4FAED;border:1.5px dashed rgba(27,40,17,0.35);border-radius:10px;padding:20px;\">\n<span style=\"font-family:'SF Mono',SFMono-Regular,Consolas,'Liberation Mono',Menlo,monospace;font-size:28px;font-weight:700;letter-spacing:7px;color:#1B2811;\">773204</span>\n</td>\n</tr>\n</table>\n\n<p style=\"margin:0;color:#5B6472;font-size:13px;\">This code expires in 60 minutes. Didn&rsquo;t request this? Your password is still safe &mdash; just ignore this email.</p>\n\n</div>\n</td>\n</tr>\n\n<!-- Footer -->\n<tr>\n<td style=\"padding:22px 4px 0;\">\n<table role=\"presentation\" cellpadding=\"0\" cellspacing=\"0\">\n<tr>\n<td style=\"padding-right:10px;vertical-align:middle;\">\n<img src=\"https://kontributa.vercel.app/logo/icon-light.svg\" width=\"16\" height=\"16\" alt=\"\" style=\"display:block;border:0;outline:none;\">\n</td>\n<td style=\"vertical-align:middle;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#5B6472;font-size:12px;line-height:1.5;\">\nSent by Kontributa &mdash; automated, safe to ignore if you weren&rsquo;t expecting it.\n</td>\n</tr>\n</table>\n</td>\n</tr>\n\n</table>\n</td>\n</tr>\n</table>\n</body>\n</html>"}, {"id": "purse_reminder", "label": "Purse reminder", "html": "<!doctype html>\n<html>\n<head>\n<meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n<meta name=\"color-scheme\" content=\"light\">\n<title>Reminder: August Dues is still pending</title>\n</head>\n<body style=\"margin:0;padding:0;background-color:#F4FAED;\">\n<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"background-color:#F4FAED;\">\n<tr>\n<td align=\"center\" style=\"padding:40px 16px;\">\n<table role=\"presentation\" width=\"480\" cellpadding=\"0\" cellspacing=\"0\" style=\"width:480px;max-width:100%;\">\n\n<!-- Wordmark, sitting directly on the page -- no dark banner. Real\n     apps built on this brand never put the logo in a colored bar; it\n     sits on the paper background exactly like this everywhere else. -->\n<tr>\n<td style=\"padding:0 4px 28px;\">\n<img src=\"https://kontributa.vercel.app/logo/lockup-light.svg\" width=\"150\" height=\"45\" alt=\"Kontributa\" style=\"display:block;border:0;outline:none;\">\n</td>\n</tr>\n\n<!-- Content card. White-on-paper is the one case this app's own design\n     system calls for a border (see Card.tsx: background contrast alone\n     isn't quite enough there) -- plus a left accent stripe, the same\n     idiom the dashboard itself uses for a flagged/lagging/urgent item,\n     so the email's \"mood\" reads before a single word is read. -->\n<tr>\n<td style=\"background-color:#ffffff;border:1px solid rgba(27,40,17,0.14);border-left:4px solid #B8892B;border-radius:10px;padding:36px 32px;\">\n<div style=\"font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#1B2811;font-size:15px;line-height:1.65;\">\n\n<p style=\"margin:0 0 4px;font-size:18px;font-weight:700;color:#1B2811;\">Still pending: August Dues</p>\n<p style=\"margin:0 0 8px;\">Hi Ada, just a nudge &mdash; your contribution below hasn&rsquo;t come through yet.</p>\n\n<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"margin:16px 0 24px;border-collapse:collapse;\">\n<tr style=\"border-bottom:1px solid rgba(27,40,17,0.12);\">\n<td style=\"padding:10px 0;font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:#5B6472;\">Amount</td>\n<td align=\"right\" style=\"padding:10px 0;font-size:16px;font-weight:700;color:#1B2811;\">&#8358;2,500.00</td>\n</tr>\n<tr>\n<td style=\"padding:10px 0;font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:#5B6472;\">Deadline</td>\n<td align=\"right\" style=\"padding:10px 0;font-size:14px;color:#1B2811;\">Aug 31, 2026</td>\n</tr>\n</table>\n\n<table role=\"presentation\" cellpadding=\"0\" cellspacing=\"0\">\n<tr>\n<td style=\"border-radius:8px;background-color:#1B2811;\">\n<a href=\"https://kontributa.vercel.app\" style=\"display:inline-block;padding:12px 22px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:14px;font-weight:600;color:#F4FAED;text-decoration:none;\">Open my purses</a>\n</td>\n</tr>\n</table>\n\n</div>\n</td>\n</tr>\n\n<!-- Footer -->\n<tr>\n<td style=\"padding:22px 4px 0;\">\n<table role=\"presentation\" cellpadding=\"0\" cellspacing=\"0\">\n<tr>\n<td style=\"padding-right:10px;vertical-align:middle;\">\n<img src=\"https://kontributa.vercel.app/logo/icon-light.svg\" width=\"16\" height=\"16\" alt=\"\" style=\"display:block;border:0;outline:none;\">\n</td>\n<td style=\"vertical-align:middle;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#5B6472;font-size:12px;line-height:1.5;\">\nSent by Kontributa &mdash; automated, safe to ignore if you weren&rsquo;t expecting it.\n</td>\n</tr>\n</table>\n</td>\n</tr>\n\n</table>\n</td>\n</tr>\n</table>\n</body>\n</html>"}, {"id": "payment_receipt", "label": "Payment receipt", "html": "<!doctype html>\n<html>\n<head>\n<meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n<meta name=\"color-scheme\" content=\"light\">\n<title>Payment received -- August Dues</title>\n</head>\n<body style=\"margin:0;padding:0;background-color:#F4FAED;\">\n<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"background-color:#F4FAED;\">\n<tr>\n<td align=\"center\" style=\"padding:40px 16px;\">\n<table role=\"presentation\" width=\"480\" cellpadding=\"0\" cellspacing=\"0\" style=\"width:480px;max-width:100%;\">\n\n<!-- Wordmark, sitting directly on the page -- no dark banner. Real\n     apps built on this brand never put the logo in a colored bar; it\n     sits on the paper background exactly like this everywhere else. -->\n<tr>\n<td style=\"padding:0 4px 28px;\">\n<img src=\"https://kontributa.vercel.app/logo/lockup-light.svg\" width=\"150\" height=\"45\" alt=\"Kontributa\" style=\"display:block;border:0;outline:none;\">\n</td>\n</tr>\n\n<!-- Content card. White-on-paper is the one case this app's own design\n     system calls for a border (see Card.tsx: background contrast alone\n     isn't quite enough there) -- plus a left accent stripe, the same\n     idiom the dashboard itself uses for a flagged/lagging/urgent item,\n     so the email's \"mood\" reads before a single word is read. -->\n<tr>\n<td style=\"background-color:#ffffff;border:1px solid rgba(27,40,17,0.14);border-left:4px solid #A1ED63;border-radius:10px;padding:36px 32px;\">\n<div style=\"font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#1B2811;font-size:15px;line-height:1.65;\">\n\n<p style=\"margin:0 0 4px;font-size:18px;font-weight:700;color:#1B2811;\">Payment confirmed</p>\n<p style=\"margin:0 0 20px;\">Hi Ada, we&rsquo;ve confirmed your payment for <strong>August Dues</strong>. Keep this email as your receipt.</p>\n\n<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"margin:0 0 4px;background-color:#1B2811;border-radius:10px;\">\n<tr>\n<td style=\"padding:20px 22px;\">\n<span style=\"display:block;font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:rgba(244,250,237,0.65);\">Amount received</span>\n<span style=\"display:block;margin-top:4px;font-size:28px;font-weight:700;color:#A1ED63;\">&#8358;2,500.00</span>\n</td>\n</tr>\n</table>\n\n<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"margin:4px 0 0;border-collapse:collapse;\">\n<tr>\n<td style=\"padding:12px 0 0;font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:#5B6472;\">Confirmed at</td>\n<td align=\"right\" style=\"padding:12px 0 0;font-size:14px;color:#1B2811;\">Jul 26, 2026 \u00b7 10:04 AM</td>\n</tr>\n</table>\n\n</div>\n</td>\n</tr>\n\n<!-- Footer -->\n<tr>\n<td style=\"padding:22px 4px 0;\">\n<table role=\"presentation\" cellpadding=\"0\" cellspacing=\"0\">\n<tr>\n<td style=\"padding-right:10px;vertical-align:middle;\">\n<img src=\"https://kontributa.vercel.app/logo/icon-light.svg\" width=\"16\" height=\"16\" alt=\"\" style=\"display:block;border:0;outline:none;\">\n</td>\n<td style=\"vertical-align:middle;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#5B6472;font-size:12px;line-height:1.5;\">\nSent by Kontributa &mdash; automated, safe to ignore if you weren&rsquo;t expecting it.\n</td>\n</tr>\n</table>\n</td>\n</tr>\n\n</table>\n</td>\n</tr>\n</table>\n</body>\n</html>"}, {"id": "payout_completed", "label": "Payout completed", "html": "<!doctype html>\n<html>\n<head>\n<meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n<meta name=\"color-scheme\" content=\"light\">\n<title>Payout completed</title>\n</head>\n<body style=\"margin:0;padding:0;background-color:#F4FAED;\">\n<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"background-color:#F4FAED;\">\n<tr>\n<td align=\"center\" style=\"padding:40px 16px;\">\n<table role=\"presentation\" width=\"480\" cellpadding=\"0\" cellspacing=\"0\" style=\"width:480px;max-width:100%;\">\n\n<!-- Wordmark, sitting directly on the page -- no dark banner. Real\n     apps built on this brand never put the logo in a colored bar; it\n     sits on the paper background exactly like this everywhere else. -->\n<tr>\n<td style=\"padding:0 4px 28px;\">\n<img src=\"https://kontributa.vercel.app/logo/lockup-light.svg\" width=\"150\" height=\"45\" alt=\"Kontributa\" style=\"display:block;border:0;outline:none;\">\n</td>\n</tr>\n\n<!-- Content card. White-on-paper is the one case this app's own design\n     system calls for a border (see Card.tsx: background contrast alone\n     isn't quite enough there) -- plus a left accent stripe, the same\n     idiom the dashboard itself uses for a flagged/lagging/urgent item,\n     so the email's \"mood\" reads before a single word is read. -->\n<tr>\n<td style=\"background-color:#ffffff;border:1px solid rgba(27,40,17,0.14);border-left:4px solid #A1ED63;border-radius:10px;padding:36px 32px;\">\n<div style=\"font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#1B2811;font-size:15px;line-height:1.65;\">\n\n<p style=\"margin:0 0 4px;font-size:18px;font-weight:700;color:#1B2811;\">Payout sent</p>\n<p style=\"margin:0 0 20px;\">Hi Tayo, a payout for <strong>Software Engineering</strong> has been completed and sent to your registered settlement account.</p>\n\n<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"margin:0;background-color:#1B2811;border-radius:10px;\">\n<tr>\n<td style=\"padding:20px 22px;\">\n<span style=\"display:block;font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:rgba(244,250,237,0.65);\">Amount paid out</span>\n<span style=\"display:block;margin-top:4px;font-size:28px;font-weight:700;color:#A1ED63;\">&#8358;150,000.00</span>\n</td>\n</tr>\n</table>\n\n</div>\n</td>\n</tr>\n\n<!-- Footer -->\n<tr>\n<td style=\"padding:22px 4px 0;\">\n<table role=\"presentation\" cellpadding=\"0\" cellspacing=\"0\">\n<tr>\n<td style=\"padding-right:10px;vertical-align:middle;\">\n<img src=\"https://kontributa.vercel.app/logo/icon-light.svg\" width=\"16\" height=\"16\" alt=\"\" style=\"display:block;border:0;outline:none;\">\n</td>\n<td style=\"vertical-align:middle;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#5B6472;font-size:12px;line-height:1.5;\">\nSent by Kontributa &mdash; automated, safe to ignore if you weren&rsquo;t expecting it.\n</td>\n</tr>\n</table>\n</td>\n</tr>\n\n</table>\n</td>\n</tr>\n</table>\n</body>\n</html>"}, {"id": "payout_failed", "label": "Payout failed", "html": "<!doctype html>\n<html>\n<head>\n<meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n<meta name=\"color-scheme\" content=\"light\">\n<title>Payout failed</title>\n</head>\n<body style=\"margin:0;padding:0;background-color:#F4FAED;\">\n<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"background-color:#F4FAED;\">\n<tr>\n<td align=\"center\" style=\"padding:40px 16px;\">\n<table role=\"presentation\" width=\"480\" cellpadding=\"0\" cellspacing=\"0\" style=\"width:480px;max-width:100%;\">\n\n<!-- Wordmark, sitting directly on the page -- no dark banner. Real\n     apps built on this brand never put the logo in a colored bar; it\n     sits on the paper background exactly like this everywhere else. -->\n<tr>\n<td style=\"padding:0 4px 28px;\">\n<img src=\"https://kontributa.vercel.app/logo/lockup-light.svg\" width=\"150\" height=\"45\" alt=\"Kontributa\" style=\"display:block;border:0;outline:none;\">\n</td>\n</tr>\n\n<!-- Content card. White-on-paper is the one case this app's own design\n     system calls for a border (see Card.tsx: background contrast alone\n     isn't quite enough there) -- plus a left accent stripe, the same\n     idiom the dashboard itself uses for a flagged/lagging/urgent item,\n     so the email's \"mood\" reads before a single word is read. -->\n<tr>\n<td style=\"background-color:#ffffff;border:1px solid rgba(27,40,17,0.14);border-left:4px solid #A23B32;border-radius:10px;padding:36px 32px;\">\n<div style=\"font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#1B2811;font-size:15px;line-height:1.65;\">\n\n<p style=\"margin:0 0 4px;font-size:18px;font-weight:700;color:#1B2811;\">Payout didn&rsquo;t go through</p>\n<p style=\"margin:0 0 16px;\">Hi Tayo, a payout of <strong>&#8358;150,000.00</strong> for <strong>Software Engineering</strong> could not be completed.</p>\n\n<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"margin:0 0 20px;\">\n<tr>\n<td style=\"background-color:rgba(162,59,50,0.07);border-left:3px solid #A23B32;border-radius:0 8px 8px 0;padding:14px 16px;\">\n<span style=\"display:block;font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:#A23B32;\">Reason</span>\n<span style=\"display:block;margin-top:4px;font-size:14px;color:#1B2811;\">Invalid destination account</span>\n</td>\n</tr>\n</table>\n\n<p style=\"margin:0;color:#5B6472;font-size:13px;\">The funds never left the platform wallet and remain available &mdash; submit a new payout request whenever you&rsquo;re ready.</p>\n\n</div>\n</td>\n</tr>\n\n<!-- Footer -->\n<tr>\n<td style=\"padding:22px 4px 0;\">\n<table role=\"presentation\" cellpadding=\"0\" cellspacing=\"0\">\n<tr>\n<td style=\"padding-right:10px;vertical-align:middle;\">\n<img src=\"https://kontributa.vercel.app/logo/icon-light.svg\" width=\"16\" height=\"16\" alt=\"\" style=\"display:block;border:0;outline:none;\">\n</td>\n<td style=\"vertical-align:middle;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#5B6472;font-size:12px;line-height:1.5;\">\nSent by Kontributa &mdash; automated, safe to ignore if you weren&rsquo;t expecting it.\n</td>\n</tr>\n</table>\n</td>\n</tr>\n\n</table>\n</td>\n</tr>\n</table>\n</body>\n</html>"}, {"id": "contribution_expired", "label": "Invoice expired", "html": "<!doctype html>\n<html>\n<head>\n<meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n<meta name=\"color-scheme\" content=\"light\">\n<title>Your invoice for August Dues expired</title>\n</head>\n<body style=\"margin:0;padding:0;background-color:#F4FAED;\">\n<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"background-color:#F4FAED;\">\n<tr>\n<td align=\"center\" style=\"padding:40px 16px;\">\n<table role=\"presentation\" width=\"480\" cellpadding=\"0\" cellspacing=\"0\" style=\"width:480px;max-width:100%;\">\n\n<!-- Wordmark, sitting directly on the page -- no dark banner. Real\n     apps built on this brand never put the logo in a colored bar; it\n     sits on the paper background exactly like this everywhere else. -->\n<tr>\n<td style=\"padding:0 4px 28px;\">\n<img src=\"https://kontributa.vercel.app/logo/lockup-light.svg\" width=\"150\" height=\"45\" alt=\"Kontributa\" style=\"display:block;border:0;outline:none;\">\n</td>\n</tr>\n\n<!-- Content card. White-on-paper is the one case this app's own design\n     system calls for a border (see Card.tsx: background contrast alone\n     isn't quite enough there) -- plus a left accent stripe, the same\n     idiom the dashboard itself uses for a flagged/lagging/urgent item,\n     so the email's \"mood\" reads before a single word is read. -->\n<tr>\n<td style=\"background-color:#ffffff;border:1px solid rgba(27,40,17,0.14);border-left:4px solid #B8892B;border-radius:10px;padding:36px 32px;\">\n<div style=\"font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#1B2811;font-size:15px;line-height:1.65;\">\n\n<p style=\"margin:0 0 4px;font-size:18px;font-weight:700;color:#1B2811;\">Invoice window closed</p>\n<p style=\"margin:0 0 8px;\">Hi Ada, the payment window for your <strong>August Dues</strong> invoice (2,500.00) expired without a completed payment.</p>\n<p style=\"margin:0 0 20px;color:#5B6472;font-size:13px;\">No need to contact your rep &mdash; generate a fresh account number and try again whenever you&rsquo;re ready.</p>\n\n<table role=\"presentation\" cellpadding=\"0\" cellspacing=\"0\">\n<tr>\n<td style=\"border-radius:8px;background-color:#1B2811;\">\n<a href=\"https://kontributa.vercel.app\" style=\"display:inline-block;padding:12px 22px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:14px;font-weight:600;color:#F4FAED;text-decoration:none;\">Generate a new invoice</a>\n</td>\n</tr>\n</table>\n\n</div>\n</td>\n</tr>\n\n<!-- Footer -->\n<tr>\n<td style=\"padding:22px 4px 0;\">\n<table role=\"presentation\" cellpadding=\"0\" cellspacing=\"0\">\n<tr>\n<td style=\"padding-right:10px;vertical-align:middle;\">\n<img src=\"https://kontributa.vercel.app/logo/icon-light.svg\" width=\"16\" height=\"16\" alt=\"\" style=\"display:block;border:0;outline:none;\">\n</td>\n<td style=\"vertical-align:middle;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#5B6472;font-size:12px;line-height:1.5;\">\nSent by Kontributa &mdash; automated, safe to ignore if you weren&rsquo;t expecting it.\n</td>\n</tr>\n</table>\n</td>\n</tr>\n\n</table>\n</td>\n</tr>\n</table>\n</body>\n</html>"}];
+  const headerHtml = `
+<!-- Dark Forest Green Header with PNG Logo Lockup -->
+<tr>
+<td style="padding:0 0 20px;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#1B2811;border-radius:12px;overflow:hidden;box-shadow:0 4px 14px rgba(27,40,17,0.18);">
+<tr>
+<td style="padding:20px 24px;background:linear-gradient(135deg, #1B2811 0%, #2A3E1B 100%);">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+<tr>
+<td style="vertical-align:middle;">
+<img src="https://kontributa.online/logo/header-lockup-dark.png" width="160" height="40" alt="Kontributa" style="display:block;border:0;outline:none;max-width:100%;height:auto;" onerror="this.onerror=null;this.parentNode.innerHTML='<div style=\\'display:flex;align-items:center;gap:10px;\\'><svg xmlns=\\'http://www.w3.org/2000/svg\\' viewBox=\\'0 0 100 100\\' width=\\'28\\' height=\\'28\\'><circle cx=\\'50\\' cy=\\'50\\' r=\\'40\\' fill=\\'#F4FAED\\'/><line x1=\\'24\\' y1=\\'62\\' x2=\\'64\\' y2=\\'62\\' stroke=\\'#1B2811\\' stroke-width=\\'8\\' stroke-linecap=\\'round\\'/><path d=\\'M32 50 L44 62 L70 34\\' fill=\\'none\\' stroke=\\'#1B2811\\' stroke-width=\\'8\\' stroke-linecap=\\'round\\' stroke-linejoin=\\'round\\'/><circle cx=\\'32\\' cy=\\'50\\' r=\\'6\\' fill=\\'#A1ED63\\'/><circle cx=\\'44\\' cy=\\'62\\' r=\\'7\\' fill=\\'#A1ED63\\'/><circle cx=\\'70\\' cy=\\'34\\' r=\\'9\\' fill=\\'#A1ED63\\'/></svg><span style=\\'font-family:sans-serif;font-size:22px;font-weight:800;color:#F4FAED;\\'>Kontributa</span></div>';">
+</td>
+<td align="right" style="vertical-align:middle;">
+<span style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#A1ED63;background:rgba(161,237,99,0.12);padding:4px 10px;border-radius:999px;border:1px solid rgba(161,237,99,0.25);">
+Group Finance
+</span>
+</td>
+</tr>
+</table>
+</td>
+</tr>
+</table>
+</td>
+</tr>
+`;
+
+  const footerLogoSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="16" height="16" style="display:block;border:0;outline:none;"><circle cx="50" cy="50" r="40" fill="#1B2811" /><line x1="24" y1="62" x2="64" y2="62" stroke="#F4FAED" stroke-width="8" stroke-linecap="round" /><path d="M32 50 L44 62 L70 34" fill="none" stroke="#F4FAED" stroke-width="8" stroke-linecap="round" stroke-linejoin="round" /><circle cx="32" cy="50" r="6" fill="#A1ED63" /><circle cx="44" cy="62" r="7" fill="#A1ED63" /><circle cx="70" cy="34" r="9" fill="#A1ED63" /></svg>`;
+
+  const entries = [
+    {
+      "id": "verify_email",
+      "label": "Verify email",
+      "html": `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="light">
+<title>Verify your Kontributa account</title>
+</head>
+<body style="margin:0;padding:0;background-color:#F4FAED;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#F4FAED;">
+<tr>
+<td align="center" style="padding:40px 16px;">
+<table role="presentation" width="480" cellpadding="0" cellspacing="0" style="width:480px;max-width:100%;">
+${headerHtml}
+<tr>
+<td style="background-color:#ffffff;border:1px solid rgba(27,40,17,0.14);border-left:4px solid #A1ED63;border-radius:10px;padding:36px 32px;">
+<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#1B2811;font-size:15px;line-height:1.65;">
+<p style="margin:0 0 4px;font-size:18px;font-weight:700;color:#1B2811;">Confirm it&rsquo;s you</p>
+<p style="margin:0 0 20px;">Hi Ada, use the code below to verify your email address and finish setting up your account.</p>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;min-width:100%;margin:0 0 24px;border-collapse:collapse;">
+<tr>
+<td align="center" width="100%" style="width:100%;background-color:#F4FAED;border:1.5px dashed rgba(27,40,17,0.35);border-radius:10px;padding:22px 16px;text-align:center;">
+<span style="display:inline-block;font-family:'SF Mono',SFMono-Regular,Consolas,'Liberation Mono',Menlo,monospace;font-size:32px;font-weight:800;letter-spacing:10px;color:#1B2811;padding-left:10px;text-align:center;">482913</span>
+</td>
+</tr>
+</table>
+<p style="margin:0;color:#5B6472;font-size:13px;">This code expires in 15 minutes. Didn&rsquo;t create a Kontributa account? You can ignore this email.</p>
+</div>
+</td>
+</tr>
+<tr>
+<td style="padding:22px 4px 0;">
+<table role="presentation" cellpadding="0" cellspacing="0">
+<tr>
+<td style="padding-right:10px;vertical-align:middle;">
+${footerLogoSvg}
+</td>
+<td style="vertical-align:middle;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#5B6472;font-size:12px;line-height:1.5;">
+Sent by Kontributa &mdash; automated, safe to ignore if you weren&rsquo;t expecting it.
+</td>
+</tr>
+</table>
+</td>
+</tr>
+</table>
+</td>
+</tr>
+</table>
+</body>
+</html>`
+    },
+    {
+      "id": "password_reset",
+      "label": "Password reset",
+      "html": `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="light">
+<title>Reset your Kontributa password</title>
+</head>
+<body style="margin:0;padding:0;background-color:#F4FAED;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#F4FAED;">
+<tr>
+<td align="center" style="padding:40px 16px;">
+<table role="presentation" width="480" cellpadding="0" cellspacing="0" style="width:480px;max-width:100%;">
+${headerHtml}
+<tr>
+<td style="background-color:#ffffff;border:1px solid rgba(27,40,17,0.14);border-left:4px solid #B8892B;border-radius:10px;padding:36px 32px;">
+<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#1B2811;font-size:15px;line-height:1.65;">
+<p style="margin:0 0 4px;font-size:18px;font-weight:700;color:#1B2811;">Reset your password</p>
+<p style="margin:0 0 20px;">Hi Ada, we received a request to reset your password. Use the code below to continue.</p>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;min-width:100%;margin:0 0 24px;border-collapse:collapse;">
+<tr>
+<td align="center" width="100%" style="width:100%;background-color:#F4FAED;border:1.5px dashed rgba(27,40,17,0.35);border-radius:10px;padding:22px 16px;text-align:center;">
+<span style="display:inline-block;font-family:'SF Mono',SFMono-Regular,Consolas,'Liberation Mono',Menlo,monospace;font-size:32px;font-weight:800;letter-spacing:10px;color:#1B2811;padding-left:10px;text-align:center;">773204</span>
+</td>
+</tr>
+</table>
+<p style="margin:0;color:#5B6472;font-size:13px;">This code expires in 60 minutes. Didn&rsquo;t request this? Your password is still safe &mdash; just ignore this email.</p>
+</div>
+</td>
+</tr>
+<tr>
+<td style="padding:22px 4px 0;">
+<table role="presentation" cellpadding="0" cellspacing="0">
+<tr>
+<td style="padding-right:10px;vertical-align:middle;">
+${footerLogoSvg}
+</td>
+<td style="vertical-align:middle;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#5B6472;font-size:12px;line-height:1.5;">
+Sent by Kontributa &mdash; automated, safe to ignore if you weren&rsquo;t expecting it.
+</td>
+</tr>
+</table>
+</td>
+</tr>
+</table>
+</td>
+</tr>
+</table>
+</body>
+</html>`
+    },
+    {
+      "id": "purse_reminder",
+      "label": "Purse reminder",
+      "html": `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="light">
+<title>Reminder: August Dues is still pending</title>
+</head>
+<body style="margin:0;padding:0;background-color:#F4FAED;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#F4FAED;">
+<tr>
+<td align="center" style="padding:40px 16px;">
+<table role="presentation" width="480" cellpadding="0" cellspacing="0" style="width:480px;max-width:100%;">
+${headerHtml}
+<tr>
+<td style="background-color:#ffffff;border:1px solid rgba(27,40,17,0.14);border-left:4px solid #B8892B;border-radius:10px;padding:36px 32px;">
+<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#1B2811;font-size:15px;line-height:1.65;">
+<p style="margin:0 0 4px;font-size:18px;font-weight:700;color:#1B2811;">Still pending: August Dues</p>
+<p style="margin:0 0 8px;">Hi Ada, just a nudge &mdash; your contribution below hasn&rsquo;t come through yet.</p>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:16px 0 24px;border-collapse:collapse;">
+<tr style="border-bottom:1px solid rgba(27,40,17,0.12);">
+<td style="padding:10px 0;font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:#5B6472;">Amount</td>
+<td align="right" style="padding:10px 0;font-size:16px;font-weight:700;color:#1B2811;">&#8358;2,500.00</td>
+</tr>
+<tr>
+<td style="padding:10px 0;font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:#5B6472;">Deadline</td>
+<td align="right" style="padding:10px 0;font-size:14px;color:#1B2811;">Aug 31, 2026</td>
+</tr>
+</table>
+<table role="presentation" cellpadding="0" cellspacing="0">
+<tr>
+<td style="border-radius:8px;background-color:#1B2811;">
+<a href="https://kontributa.online" style="display:inline-block;padding:12px 22px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:14px;font-weight:600;color:#F4FAED;text-decoration:none;">Open my purses</a>
+</td>
+</tr>
+</table>
+</div>
+</td>
+</tr>
+<tr>
+<td style="padding:22px 4px 0;">
+<table role="presentation" cellpadding="0" cellspacing="0">
+<tr>
+<td style="padding-right:10px;vertical-align:middle;">
+${footerLogoSvg}
+</td>
+<td style="vertical-align:middle;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#5B6472;font-size:12px;line-height:1.5;">
+Sent by Kontributa &mdash; automated, safe to ignore if you weren&rsquo;t expecting it.
+</td>
+</tr>
+</table>
+</td>
+</tr>
+</table>
+</td>
+</tr>
+</table>
+</body>
+</html>`
+    },
+    {
+      "id": "payment_receipt",
+      "label": "Payment receipt",
+      "html": `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="light">
+<title>Payment received -- August Dues</title>
+</head>
+<body style="margin:0;padding:0;background-color:#F4FAED;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#F4FAED;">
+<tr>
+<td align="center" style="padding:40px 16px;">
+<table role="presentation" width="480" cellpadding="0" cellspacing="0" style="width:480px;max-width:100%;">
+${headerHtml}
+<tr>
+<td style="background-color:#ffffff;border:1px solid rgba(27,40,17,0.14);border-left:4px solid #A1ED63;border-radius:10px;padding:36px 32px;">
+<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#1B2811;font-size:15px;line-height:1.65;">
+<p style="margin:0 0 4px;font-size:18px;font-weight:700;color:#1B2811;">Payment confirmed</p>
+<p style="margin:0 0 20px;">Hi Ada, we&rsquo;ve confirmed your payment for <strong>August Dues</strong>. Keep this email as your receipt.</p>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 4px;background-color:#1B2811;border-radius:10px;">
+<tr>
+<td style="padding:20px 22px;">
+<span style="display:block;font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:rgba(244,250,237,0.65);">Amount received</span>
+<span style="display:block;margin-top:4px;font-size:28px;font-weight:700;color:#A1ED63;">&#8358;2,500.00</span>
+</td>
+</tr>
+</table>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:4px 0 0;border-collapse:collapse;">
+<tr>
+<td style="padding:12px 0 0;font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:#5B6472;">Confirmed at</td>
+<td align="right" style="padding:12px 0 0;font-size:14px;color:#1B2811;">Jul 26, 2026 &middot; 10:04 AM</td>
+</tr>
+</table>
+</div>
+</td>
+</tr>
+<tr>
+<td style="padding:22px 4px 0;">
+<table role="presentation" cellpadding="0" cellspacing="0">
+<tr>
+<td style="padding-right:10px;vertical-align:middle;">
+${footerLogoSvg}
+</td>
+<td style="vertical-align:middle;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#5B6472;font-size:12px;line-height:1.5;">
+Sent by Kontributa &mdash; automated, safe to ignore if you weren&rsquo;t expecting it.
+</td>
+</tr>
+</table>
+</td>
+</tr>
+</table>
+</td>
+</tr>
+</table>
+</body>
+</html>`
+    },
+    {
+      "id": "payout_completed",
+      "label": "Payout completed",
+      "html": `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="light">
+<title>Payout completed</title>
+</head>
+<body style="margin:0;padding:0;background-color:#F4FAED;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#F4FAED;">
+<tr>
+<td align="center" style="padding:40px 16px;">
+<table role="presentation" width="480" cellpadding="0" cellspacing="0" style="width:480px;max-width:100%;">
+${headerHtml}
+<tr>
+<td style="background-color:#ffffff;border:1px solid rgba(27,40,17,0.14);border-left:4px solid #A1ED63;border-radius:10px;padding:36px 32px;">
+<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#1B2811;font-size:15px;line-height:1.65;">
+<p style="margin:0 0 4px;font-size:18px;font-weight:700;color:#1B2811;">Payout sent</p>
+<p style="margin:0 0 20px;">Hi Tayo, a payout for <strong>Software Engineering</strong> has been completed and sent to your registered settlement account.</p>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0;background-color:#1B2811;border-radius:10px;">
+<tr>
+<td style="padding:20px 22px;">
+<span style="display:block;font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:rgba(244,250,237,0.65);">Amount paid out</span>
+<span style="display:block;margin-top:4px;font-size:28px;font-weight:700;color:#A1ED63;">&#8358;150,000.00</span>
+</td>
+</tr>
+</table>
+</div>
+</td>
+</tr>
+<tr>
+<td style="padding:22px 4px 0;">
+<table role="presentation" cellpadding="0" cellspacing="0">
+<tr>
+<td style="padding-right:10px;vertical-align:middle;">
+${footerLogoSvg}
+</td>
+<td style="vertical-align:middle;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#5B6472;font-size:12px;line-height:1.5;">
+Sent by Kontributa &mdash; automated, safe to ignore if you weren&rsquo;t expecting it.
+</td>
+</tr>
+</table>
+</td>
+</tr>
+</table>
+</td>
+</tr>
+</table>
+</body>
+</html>`
+    },
+    {
+      "id": "payout_failed",
+      "label": "Payout failed",
+      "html": `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="light">
+<title>Payout failed</title>
+</head>
+<body style="margin:0;padding:0;background-color:#F4FAED;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#F4FAED;">
+<tr>
+<td align="center" style="padding:40px 16px;">
+<table role="presentation" width="480" cellpadding="0" cellspacing="0" style="width:480px;max-width:100%;">
+${headerHtml}
+<tr>
+<td style="background-color:#ffffff;border:1px solid rgba(27,40,17,0.14);border-left:4px solid #A23B32;border-radius:10px;padding:36px 32px;">
+<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#1B2811;font-size:15px;line-height:1.65;">
+<p style="margin:0 0 4px;font-size:18px;font-weight:700;color:#1B2811;">Payout didn&rsquo;t go through</p>
+<p style="margin:0 0 16px;">Hi Tayo, a payout of <strong>&#8358;150,000.00</strong> for <strong>Software Engineering</strong> could not be completed.</p>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 20px;">
+<tr>
+<td style="background-color:rgba(162,59,50,0.07);border-left:3px solid #A23B32;border-radius:0 8px 8px 0;padding:14px 16px;">
+<span style="display:block;font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:#A23B32;">Reason</span>
+<span style="display:block;margin-top:4px;font-size:14px;color:#1B2811;">Invalid destination account</span>
+</td>
+</tr>
+</table>
+<p style="margin:0;color:#5B6472;font-size:13px;">The funds never left the platform wallet and remain available &mdash; submit a new payout request whenever you&rsquo;re ready.</p>
+</div>
+</td>
+</tr>
+<tr>
+<td style="padding:22px 4px 0;">
+<table role="presentation" cellpadding="0" cellspacing="0">
+<tr>
+<td style="padding-right:10px;vertical-align:middle;">
+${footerLogoSvg}
+</td>
+<td style="vertical-align:middle;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#5B6472;font-size:12px;line-height:1.5;">
+Sent by Kontributa &mdash; automated, safe to ignore if you weren&rsquo;t expecting it.
+</td>
+</tr>
+</table>
+</td>
+</tr>
+</table>
+</td>
+</tr>
+</table>
+</body>
+</html>`
+    },
+    {
+      "id": "contribution_expired",
+      "label": "Invoice expired",
+      "html": `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="light">
+<title>Your invoice for August Dues expired</title>
+</head>
+<body style="margin:0;padding:0;background-color:#F4FAED;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#F4FAED;">
+<tr>
+<td align="center" style="padding:40px 16px;">
+<table role="presentation" width="480" cellpadding="0" cellspacing="0" style="width:480px;max-width:100%;">
+${headerHtml}
+<tr>
+<td style="background-color:#ffffff;border:1px solid rgba(27,40,17,0.14);border-left:4px solid #B8892B;border-radius:10px;padding:36px 32px;">
+<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#1B2811;font-size:15px;line-height:1.65;">
+<p style="margin:0 0 4px;font-size:18px;font-weight:700;color:#1B2811;">Invoice window closed</p>
+<p style="margin:0 0 8px;">Hi Ada, the payment window for your <strong>August Dues</strong> invoice (2,500.00) expired without a completed payment.</p>
+<p style="margin:0 0 20px;color:#5B6472;font-size:13px;">No need to contact your rep &mdash; generate a fresh account number and try again whenever you&rsquo;re ready.</p>
+<table role="presentation" cellpadding="0" cellspacing="0">
+<tr>
+<td style="border-radius:8px;background-color:#1B2811;">
+<a href="https://kontributa.online" style="display:inline-block;padding:12px 22px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:14px;font-weight:600;color:#F4FAED;text-decoration:none;">Generate a new invoice</a>
+</td>
+</tr>
+</table>
+</div>
+</td>
+</tr>
+<tr>
+<td style="padding:22px 4px 0;">
+<table role="presentation" cellpadding="0" cellspacing="0">
+<tr>
+<td style="padding-right:10px;vertical-align:middle;">
+${footerLogoSvg}
+</td>
+<td style="vertical-align:middle;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#5B6472;font-size:12px;line-height:1.5;">
+Sent by Kontributa &mdash; automated, safe to ignore if you weren&rsquo;t expecting it.
+</td>
+</tr>
+</table>
+</td>
+</tr>
+</table>
+</td>
+</tr>
+</table>
+</body>
+</html>`
+    }
+  ];
+
   const tabs = document.getElementById("tabs");
   const frame = document.getElementById("preview");
 

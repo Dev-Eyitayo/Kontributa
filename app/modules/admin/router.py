@@ -12,6 +12,7 @@ from app.modules.admin.schemas import (
     FlaggedContributionItem,
     ReconciliationRunRequest,
     ReconciliationRunResponse,
+    WebhookEventDetailOut,
     WebhookEventListItem,
 )
 from app.modules.admin.service import AdminService
@@ -67,6 +68,31 @@ async def list_webhook_events(
             "total": total,
             "limit": limit,
             "offset": offset,
+        }
+    )
+
+
+@router.get("/webhook-events/{event_id}", response_model=StandardResponse[WebhookEventDetailOut])
+async def get_webhook_event_detail(
+    event_id: str,
+    _: CurrentUser = Depends(get_current_admin_user),
+    service: AdminService = Depends(get_admin_service),
+) -> JSONResponse:
+    from app.core.exceptions import NotFoundError
+
+    event = await service.get_webhook_event(event_id)
+    if event is None:
+        raise NotFoundError("webhook event not found", code="webhook_event_not_found")
+
+    return success_response(
+        {
+            "id": str(event.id),
+            "provider_event_id": event.provider_event_id,
+            "raw_payload": event.raw_payload,
+            "signature_valid": event.signature_valid,
+            "processed": event.processed,
+            "processing_error": event.processing_error,
+            "received_at": event.received_at.isoformat(),
         }
     )
 

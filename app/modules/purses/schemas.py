@@ -25,7 +25,7 @@ class CreatePurseRequest(BaseModel):
     # its target group directly.
     group_id: UUID
     title: str = Field(min_length=1, max_length=255)
-    amount: Decimal = Field(gt=0)
+    amount: Decimal = Field(gt=100)
     deadline: datetime
     enroll_mode: EnrollModeLiteral
 
@@ -33,7 +33,7 @@ class CreatePurseRequest(BaseModel):
 
 
 class UpdatePurseRequest(BaseModel):
-    amount: Optional[Decimal] = Field(default=None, gt=0)
+    amount: Optional[Decimal] = Field(default=None, gt=100)
     deadline: Optional[datetime] = None
 
     _normalize_deadline = field_validator("deadline")(_assume_utc_if_naive)

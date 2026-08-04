@@ -307,6 +307,44 @@ async def test_webhook_events_pagination(client, db_session):
     assert len(second_page.json()["data"]["items"]) == 1
 
 
+async def test_get_webhook_event_detail(client, db_session):
+    import uuid
+    from app.modules.webhooks.models import WebhookEvent
+
+    event_id = uuid.uuid4()
+    db_session.add(
+        WebhookEvent(
+            id=event_id,
+            provider_event_id="detail-evt-100",
+            raw_payload='{"event": "charge.success", "amount": 500000}',
+            signature_valid=True,
+            processed=True,
+            processing_error=None,
+        )
+    )
+    await db_session.commit()
+
+    admin_headers = await _admin_headers(db_session)
+
+    # By UUID
+    resp = await client.get(f"/admin/webhook-events/{event_id}", headers=admin_headers)
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    assert data["provider_event_id"] == "detail-evt-100"
+    assert "charge.success" in data["raw_payload"]
+    assert data["signature_valid"] is True
+    assert data["processed"] is True
+
+    # By provider_event_id
+    resp_provider = await client.get("/admin/webhook-events/detail-evt-100", headers=admin_headers)
+    assert resp_provider.status_code == 200
+    assert resp_provider.json()["data"]["id"] == str(event_id)
+
+    # 404 for non-existent
+    notFound = await client.get("/admin/webhook-events/non-existent-evt", headers=admin_headers)
+    assert notFound.status_code == 404
+
+
 async def test_flagged_contributions_pagination(client, db_session):
     ctx = await _setup_purse_with_member(client, db_session, amount="2500.00")
     result = await db_session.execute(select(Contribution).where(Contribution.id == UUID(ctx["contribution_id"])))

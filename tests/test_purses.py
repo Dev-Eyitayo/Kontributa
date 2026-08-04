@@ -250,6 +250,38 @@ async def test_edit_purse_amount_must_be_positive(client, db_session):
     assert resp.status_code == 422
 
 
+async def test_purse_amount_must_be_greater_than_100(client, db_session):
+    org, group, headers = await _setup_group_with_admin(client, db_session)
+
+    # Rejects amount <= 100 on create
+    create_100 = await client.post(
+        "/purses",
+        json=_purse_payload(group.id, title="Low Fee", amount="100.00"),
+        headers=headers,
+    )
+    assert create_100.status_code == 422
+
+    create_50 = await client.post(
+        "/purses",
+        json=_purse_payload(group.id, title="Low Fee", amount="50.00"),
+        headers=headers,
+    )
+    assert create_50.status_code == 422
+
+    # Allows amount > 100
+    create_valid = await client.post(
+        "/purses",
+        json=_purse_payload(group.id, title="Valid Fee", amount="100.01"),
+        headers=headers,
+    )
+    assert create_valid.status_code == 201
+    purse_id = create_valid.json()["data"]["id"]
+
+    # Rejects amount <= 100 on patch/edit
+    patch_100 = await client.patch(f"/purses/{purse_id}", json={"amount": "100.00"}, headers=headers)
+    assert patch_100.status_code == 422
+
+
 async def test_cannot_edit_closed_purse(client, db_session):
     org, group, headers = await _setup_group_with_admin(client, db_session)
     create = await client.post(

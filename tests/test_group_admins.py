@@ -303,7 +303,7 @@ async def test_update_group_sets_cohort_retroactive_for_members_not_purses(clien
         json={
             "group_id": group_id,
             "title": "Before Cohort",
-            "amount": "100.00",
+            "amount": "500.00",
             "deadline": early_purse_deadline,
             "enroll_mode": "snapshot",
         },
@@ -341,7 +341,7 @@ async def test_update_group_sets_cohort_retroactive_for_members_not_purses(clien
         json={
             "group_id": group_id,
             "title": "After Cohort",
-            "amount": "100.00",
+            "amount": "500.00",
             "deadline": early_purse_deadline,
             "enroll_mode": "snapshot",
         },
@@ -458,7 +458,7 @@ async def test_group_id_scoped_endpoints_reject_a_group_the_admin_does_not_manag
         json={
             "group_id": str(other_group.id),
             "title": "Sneaky Fee",
-            "amount": "100.00",
+            "amount": "500.00",
             "deadline": "2999-01-01T00:00:00Z",
             "enroll_mode": "snapshot",
         },

@@ -23,6 +23,16 @@ class WebhookEventListItem(BaseModel):
     received_at: datetime
 
 
+class WebhookEventDetailOut(BaseModel):
+    id: UUID
+    provider_event_id: str
+    raw_payload: str
+    signature_valid: bool
+    processed: bool
+    processing_error: Optional[str] = None
+    received_at: datetime
+
+
 class FlaggedContributionItem(BaseModel):
     id: UUID
     purse_id: UUID

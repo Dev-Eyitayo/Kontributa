@@ -21,6 +21,22 @@ class AdminService:
         result = await self.db.execute(stmt.order_by(WebhookEvent.received_at.desc()).limit(limit).offset(offset))
         return list(result.scalars().all()), total
 
+    async def get_webhook_event(self, event_id: str) -> Optional[WebhookEvent]:
+        from uuid import UUID
+        event = None
+        try:
+            event = await self.db.get(WebhookEvent, UUID(event_id))
+        except Exception:
+            pass
+
+        if event is None:
+            result = await self.db.execute(
+                select(WebhookEvent).where(WebhookEvent.provider_event_id == event_id)
+            )
+            event = result.scalar_one_or_none()
+
+        return event
+
     async def list_flagged_contributions(self, limit: int = 20, offset: int = 0) -> tuple[list[Contribution], int]:
         stmt = select(Contribution).where(Contribution.status == ContributionStatus.FLAGGED_FOR_REVIEW)
         total = (await self.db.execute(select(func.count()).select_from(stmt.subquery()))).scalar_one()

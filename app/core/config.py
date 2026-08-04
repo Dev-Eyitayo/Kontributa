@@ -61,8 +61,8 @@ class Settings(BaseSettings):
 
     USE_HTTPONLY_COOKIES: bool = False
 
-    EMAIL_VERIFICATION_TOKEN_EXPIRE_MINUTES: int = 10
-    PASSWORD_RESET_TOKEN_EXPIRE_MINUTES: int = 10
+    EMAIL_VERIFICATION_TOKEN_EXPIRE_MINUTES: int = 15
+    PASSWORD_RESET_TOKEN_EXPIRE_MINUTES: int = 15
 
     # Sandbox vs live is a config change only -- never a code change.
     MONNIFY_BASE_URL: str = "https://sandbox.monnify.com"

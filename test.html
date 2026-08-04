@@ -97,7 +97,7 @@
 <body>
 <header>
   <h1>Kontributa email templates</h1>
-  <p>Rendered with PNG logo lockup on a dark forest green header.</p>
+  <p>Rendered with full-width dark forest header and smooth rounded OTP container.</p>
 </header>
 <div class="tabs" id="tabs"></div>
 <div class="stage">
@@ -109,13 +109,13 @@
 <footer>Each accent color is deliberate: lime for a confirmed/paid moment, brass for something pending, brick for a real failure.</footer>
 <script>
   const headerHtml = `
-<!-- Dark Forest Green Header with PNG Logo Lockup -->
+<!-- Dark Forest Green Header - Exact 100% Width Alignment -->
 <tr>
-<td style="padding:0 0 20px;">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#1B2811;border-radius:12px;overflow:hidden;box-shadow:0 4px 14px rgba(27,40,17,0.18);">
+<td style="padding:0 0 20px;width:100%;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;min-width:100%;border-collapse:collapse;box-sizing:border-box;background-color:#1B2811;border-radius:12px;overflow:hidden;box-shadow:0 4px 14px rgba(27,40,17,0.18);">
 <tr>
-<td style="padding:20px 24px;background:linear-gradient(135deg, #1B2811 0%, #2A3E1B 100%);">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+<td style="padding:20px 24px;width:100%;box-sizing:border-box;background:linear-gradient(135deg, #1B2811 0%, #2A3E1B 100%);">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;min-width:100%;border-collapse:collapse;">
 <tr>
 <td style="vertical-align:middle;">
 <img src="https://kontributa.online/logo/header-lockup-dark.png" width="160" height="40" alt="Kontributa" style="display:block;border:0;outline:none;max-width:100%;height:auto;" onerror="this.onerror=null;this.parentNode.innerHTML='<div style=\\'display:flex;align-items:center;gap:10px;\\'><svg xmlns=\\'http://www.w3.org/2000/svg\\' viewBox=\\'0 0 100 100\\' width=\\'28\\' height=\\'28\\'><circle cx=\\'50\\' cy=\\'50\\' r=\\'40\\' fill=\\'#F4FAED\\'/><line x1=\\'24\\' y1=\\'62\\' x2=\\'64\\' y2=\\'62\\' stroke=\\'#1B2811\\' stroke-width=\\'8\\' stroke-linecap=\\'round\\'/><path d=\\'M32 50 L44 62 L70 34\\' fill=\\'none\\' stroke=\\'#1B2811\\' stroke-width=\\'8\\' stroke-linecap=\\'round\\' stroke-linejoin=\\'round\\'/><circle cx=\\'32\\' cy=\\'50\\' r=\\'6\\' fill=\\'#A1ED63\\'/><circle cx=\\'44\\' cy=\\'62\\' r=\\'7\\' fill=\\'#A1ED63\\'/><circle cx=\\'70\\' cy=\\'34\\' r=\\'9\\' fill=\\'#A1ED63\\'/></svg><span style=\\'font-family:sans-serif;font-size:22px;font-weight:800;color:#F4FAED;\\'>Kontributa</span></div>';">
@@ -149,19 +149,22 @@ Group Finance
 <title>Verify your Kontributa account</title>
 </head>
 <body style="margin:0;padding:0;background-color:#F4FAED;">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#F4FAED;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;min-width:100%;background-color:#F4FAED;border-collapse:collapse;">
 <tr>
 <td align="center" style="padding:40px 16px;">
-<table role="presentation" width="480" cellpadding="0" cellspacing="0" style="width:480px;max-width:100%;">
+<table role="presentation" width="480" cellpadding="0" cellspacing="0" style="width:480px;max-width:100%;border-collapse:collapse;box-sizing:border-box;">
 ${headerHtml}
 <tr>
-<td style="background-color:#ffffff;border:1px solid rgba(27,40,17,0.14);border-left:4px solid #A1ED63;border-radius:10px;padding:36px 32px;">
+<td style="width:100%;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;min-width:100%;border-collapse:collapse;box-sizing:border-box;background-color:#ffffff;border:1px solid rgba(27,40,17,0.14);border-left:4px solid #A1ED63;border-radius:10px;overflow:hidden;">
+<tr>
+<td style="padding:36px 32px;width:100%;box-sizing:border-box;">
 <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#1B2811;font-size:15px;line-height:1.65;">
 <p style="margin:0 0 4px;font-size:18px;font-weight:700;color:#1B2811;">Confirm it&rsquo;s you</p>
 <p style="margin:0 0 20px;">Hi Ada, use the code below to verify your email address and finish setting up your account.</p>
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;min-width:100%;margin:0 0 24px;border-collapse:collapse;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;min-width:100%;margin:0 0 24px;border-collapse:collapse;box-sizing:border-box;">
 <tr>
-<td align="center" width="100%" style="width:100%;background-color:#F4FAED;border:1.5px dashed rgba(27,40,17,0.35);border-radius:10px;padding:22px 16px;text-align:center;">
+<td align="center" width="100%" style="width:100%;box-sizing:border-box;background-color:#F4FAED;border:1.5px solid rgba(27,40,17,0.22);border-radius:12px;padding:22px 16px;text-align:center;">
 <span style="display:inline-block;font-family:'SF Mono',SFMono-Regular,Consolas,'Liberation Mono',Menlo,monospace;font-size:32px;font-weight:800;letter-spacing:10px;color:#1B2811;padding-left:10px;text-align:center;">482913</span>
 </td>
 </tr>
@@ -170,9 +173,12 @@ ${headerHtml}
 </div>
 </td>
 </tr>
+</table>
+</td>
+</tr>
 <tr>
-<td style="padding:22px 4px 0;">
-<table role="presentation" cellpadding="0" cellspacing="0">
+<td style="padding:22px 4px 0;width:100%;">
+<table role="presentation" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
 <tr>
 <td style="padding-right:10px;vertical-align:middle;">
 ${footerLogoSvg}
@@ -203,19 +209,22 @@ Sent by Kontributa &mdash; automated, safe to ignore if you weren&rsquo;t expect
 <title>Reset your Kontributa password</title>
 </head>
 <body style="margin:0;padding:0;background-color:#F4FAED;">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#F4FAED;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;min-width:100%;background-color:#F4FAED;border-collapse:collapse;">
 <tr>
 <td align="center" style="padding:40px 16px;">
-<table role="presentation" width="480" cellpadding="0" cellspacing="0" style="width:480px;max-width:100%;">
+<table role="presentation" width="480" cellpadding="0" cellspacing="0" style="width:480px;max-width:100%;border-collapse:collapse;box-sizing:border-box;">
 ${headerHtml}
 <tr>
-<td style="background-color:#ffffff;border:1px solid rgba(27,40,17,0.14);border-left:4px solid #B8892B;border-radius:10px;padding:36px 32px;">
+<td style="width:100%;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;min-width:100%;border-collapse:collapse;box-sizing:border-box;background-color:#ffffff;border:1px solid rgba(27,40,17,0.14);border-left:4px solid #B8892B;border-radius:10px;overflow:hidden;">
+<tr>
+<td style="padding:36px 32px;width:100%;box-sizing:border-box;">
 <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#1B2811;font-size:15px;line-height:1.65;">
 <p style="margin:0 0 4px;font-size:18px;font-weight:700;color:#1B2811;">Reset your password</p>
 <p style="margin:0 0 20px;">Hi Ada, we received a request to reset your password. Use the code below to continue.</p>
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;min-width:100%;margin:0 0 24px;border-collapse:collapse;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;min-width:100%;margin:0 0 24px;border-collapse:collapse;box-sizing:border-box;">
 <tr>
-<td align="center" width="100%" style="width:100%;background-color:#F4FAED;border:1.5px dashed rgba(27,40,17,0.35);border-radius:10px;padding:22px 16px;text-align:center;">
+<td align="center" width="100%" style="width:100%;box-sizing:border-box;background-color:#F4FAED;border:1.5px solid rgba(27,40,17,0.22);border-radius:12px;padding:22px 16px;text-align:center;">
 <span style="display:inline-block;font-family:'SF Mono',SFMono-Regular,Consolas,'Liberation Mono',Menlo,monospace;font-size:32px;font-weight:800;letter-spacing:10px;color:#1B2811;padding-left:10px;text-align:center;">773204</span>
 </td>
 </tr>
@@ -224,9 +233,12 @@ ${headerHtml}
 </div>
 </td>
 </tr>
+</table>
+</td>
+</tr>
 <tr>
-<td style="padding:22px 4px 0;">
-<table role="presentation" cellpadding="0" cellspacing="0">
+<td style="padding:22px 4px 0;width:100%;">
+<table role="presentation" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
 <tr>
 <td style="padding-right:10px;vertical-align:middle;">
 ${footerLogoSvg}
@@ -257,13 +269,16 @@ Sent by Kontributa &mdash; automated, safe to ignore if you weren&rsquo;t expect
 <title>Reminder: August Dues is still pending</title>
 </head>
 <body style="margin:0;padding:0;background-color:#F4FAED;">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#F4FAED;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;min-width:100%;background-color:#F4FAED;border-collapse:collapse;">
 <tr>
 <td align="center" style="padding:40px 16px;">
-<table role="presentation" width="480" cellpadding="0" cellspacing="0" style="width:480px;max-width:100%;">
+<table role="presentation" width="480" cellpadding="0" cellspacing="0" style="width:480px;max-width:100%;border-collapse:collapse;box-sizing:border-box;">
 ${headerHtml}
 <tr>
-<td style="background-color:#ffffff;border:1px solid rgba(27,40,17,0.14);border-left:4px solid #B8892B;border-radius:10px;padding:36px 32px;">
+<td style="width:100%;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;min-width:100%;border-collapse:collapse;box-sizing:border-box;background-color:#ffffff;border:1px solid rgba(27,40,17,0.14);border-left:4px solid #B8892B;border-radius:10px;overflow:hidden;">
+<tr>
+<td style="padding:36px 32px;width:100%;box-sizing:border-box;">
 <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#1B2811;font-size:15px;line-height:1.65;">
 <p style="margin:0 0 4px;font-size:18px;font-weight:700;color:#1B2811;">Still pending: August Dues</p>
 <p style="margin:0 0 8px;">Hi Ada, just a nudge &mdash; your contribution below hasn&rsquo;t come through yet.</p>
@@ -277,7 +292,7 @@ ${headerHtml}
 <td align="right" style="padding:10px 0;font-size:14px;color:#1B2811;">Aug 31, 2026</td>
 </tr>
 </table>
-<table role="presentation" cellpadding="0" cellspacing="0">
+<table role="presentation" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
 <tr>
 <td style="border-radius:8px;background-color:#1B2811;">
 <a href="https://kontributa.online" style="display:inline-block;padding:12px 22px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:14px;font-weight:600;color:#F4FAED;text-decoration:none;">Open my purses</a>
@@ -287,9 +302,12 @@ ${headerHtml}
 </div>
 </td>
 </tr>
+</table>
+</td>
+</tr>
 <tr>
-<td style="padding:22px 4px 0;">
-<table role="presentation" cellpadding="0" cellspacing="0">
+<td style="padding:22px 4px 0;width:100%;">
+<table role="presentation" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
 <tr>
 <td style="padding-right:10px;vertical-align:middle;">
 ${footerLogoSvg}
@@ -320,13 +338,16 @@ Sent by Kontributa &mdash; automated, safe to ignore if you weren&rsquo;t expect
 <title>Payment received -- August Dues</title>
 </head>
 <body style="margin:0;padding:0;background-color:#F4FAED;">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#F4FAED;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;min-width:100%;background-color:#F4FAED;border-collapse:collapse;">
 <tr>
 <td align="center" style="padding:40px 16px;">
-<table role="presentation" width="480" cellpadding="0" cellspacing="0" style="width:480px;max-width:100%;">
+<table role="presentation" width="480" cellpadding="0" cellspacing="0" style="width:480px;max-width:100%;border-collapse:collapse;box-sizing:border-box;">
 ${headerHtml}
 <tr>
-<td style="background-color:#ffffff;border:1px solid rgba(27,40,17,0.14);border-left:4px solid #A1ED63;border-radius:10px;padding:36px 32px;">
+<td style="width:100%;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;min-width:100%;border-collapse:collapse;box-sizing:border-box;background-color:#ffffff;border:1px solid rgba(27,40,17,0.14);border-left:4px solid #A1ED63;border-radius:10px;overflow:hidden;">
+<tr>
+<td style="padding:36px 32px;width:100%;box-sizing:border-box;">
 <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#1B2811;font-size:15px;line-height:1.65;">
 <p style="margin:0 0 4px;font-size:18px;font-weight:700;color:#1B2811;">Payment confirmed</p>
 <p style="margin:0 0 20px;">Hi Ada, we&rsquo;ve confirmed your payment for <strong>August Dues</strong>. Keep this email as your receipt.</p>
@@ -347,9 +368,12 @@ ${headerHtml}
 </div>
 </td>
 </tr>
+</table>
+</td>
+</tr>
 <tr>
-<td style="padding:22px 4px 0;">
-<table role="presentation" cellpadding="0" cellspacing="0">
+<td style="padding:22px 4px 0;width:100%;">
+<table role="presentation" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
 <tr>
 <td style="padding-right:10px;vertical-align:middle;">
 ${footerLogoSvg}
@@ -380,13 +404,16 @@ Sent by Kontributa &mdash; automated, safe to ignore if you weren&rsquo;t expect
 <title>Payout completed</title>
 </head>
 <body style="margin:0;padding:0;background-color:#F4FAED;">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#F4FAED;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;min-width:100%;background-color:#F4FAED;border-collapse:collapse;">
 <tr>
 <td align="center" style="padding:40px 16px;">
-<table role="presentation" width="480" cellpadding="0" cellspacing="0" style="width:480px;max-width:100%;">
+<table role="presentation" width="480" cellpadding="0" cellspacing="0" style="width:480px;max-width:100%;border-collapse:collapse;box-sizing:border-box;">
 ${headerHtml}
 <tr>
-<td style="background-color:#ffffff;border:1px solid rgba(27,40,17,0.14);border-left:4px solid #A1ED63;border-radius:10px;padding:36px 32px;">
+<td style="width:100%;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;min-width:100%;border-collapse:collapse;box-sizing:border-box;background-color:#ffffff;border:1px solid rgba(27,40,17,0.14);border-left:4px solid #A1ED63;border-radius:10px;overflow:hidden;">
+<tr>
+<td style="padding:36px 32px;width:100%;box-sizing:border-box;">
 <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#1B2811;font-size:15px;line-height:1.65;">
 <p style="margin:0 0 4px;font-size:18px;font-weight:700;color:#1B2811;">Payout sent</p>
 <p style="margin:0 0 20px;">Hi Tayo, a payout for <strong>Software Engineering</strong> has been completed and sent to your registered settlement account.</p>
@@ -401,9 +428,12 @@ ${headerHtml}
 </div>
 </td>
 </tr>
+</table>
+</td>
+</tr>
 <tr>
-<td style="padding:22px 4px 0;">
-<table role="presentation" cellpadding="0" cellspacing="0">
+<td style="padding:22px 4px 0;width:100%;">
+<table role="presentation" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
 <tr>
 <td style="padding-right:10px;vertical-align:middle;">
 ${footerLogoSvg}
@@ -434,13 +464,16 @@ Sent by Kontributa &mdash; automated, safe to ignore if you weren&rsquo;t expect
 <title>Payout failed</title>
 </head>
 <body style="margin:0;padding:0;background-color:#F4FAED;">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#F4FAED;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;min-width:100%;background-color:#F4FAED;border-collapse:collapse;">
 <tr>
 <td align="center" style="padding:40px 16px;">
-<table role="presentation" width="480" cellpadding="0" cellspacing="0" style="width:480px;max-width:100%;">
+<table role="presentation" width="480" cellpadding="0" cellspacing="0" style="width:480px;max-width:100%;border-collapse:collapse;box-sizing:border-box;">
 ${headerHtml}
 <tr>
-<td style="background-color:#ffffff;border:1px solid rgba(27,40,17,0.14);border-left:4px solid #A23B32;border-radius:10px;padding:36px 32px;">
+<td style="width:100%;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;min-width:100%;border-collapse:collapse;box-sizing:border-box;background-color:#ffffff;border:1px solid rgba(27,40,17,0.14);border-left:4px solid #A23B32;border-radius:10px;overflow:hidden;">
+<tr>
+<td style="padding:36px 32px;width:100%;box-sizing:border-box;">
 <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#1B2811;font-size:15px;line-height:1.65;">
 <p style="margin:0 0 4px;font-size:18px;font-weight:700;color:#1B2811;">Payout didn&rsquo;t go through</p>
 <p style="margin:0 0 16px;">Hi Tayo, a payout of <strong>&#8358;150,000.00</strong> for <strong>Software Engineering</strong> could not be completed.</p>
@@ -456,9 +489,12 @@ ${headerHtml}
 </div>
 </td>
 </tr>
+</table>
+</td>
+</tr>
 <tr>
-<td style="padding:22px 4px 0;">
-<table role="presentation" cellpadding="0" cellspacing="0">
+<td style="padding:22px 4px 0;width:100%;">
+<table role="presentation" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
 <tr>
 <td style="padding-right:10px;vertical-align:middle;">
 ${footerLogoSvg}
@@ -489,18 +525,21 @@ Sent by Kontributa &mdash; automated, safe to ignore if you weren&rsquo;t expect
 <title>Your invoice for August Dues expired</title>
 </head>
 <body style="margin:0;padding:0;background-color:#F4FAED;">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#F4FAED;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;min-width:100%;background-color:#F4FAED;border-collapse:collapse;">
 <tr>
 <td align="center" style="padding:40px 16px;">
-<table role="presentation" width="480" cellpadding="0" cellspacing="0" style="width:480px;max-width:100%;">
+<table role="presentation" width="480" cellpadding="0" cellspacing="0" style="width:480px;max-width:100%;border-collapse:collapse;box-sizing:border-box;">
 ${headerHtml}
 <tr>
-<td style="background-color:#ffffff;border:1px solid rgba(27,40,17,0.14);border-left:4px solid #B8892B;border-radius:10px;padding:36px 32px;">
+<td style="width:100%;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;min-width:100%;border-collapse:collapse;box-sizing:border-box;background-color:#ffffff;border:1px solid rgba(27,40,17,0.14);border-left:4px solid #B8892B;border-radius:10px;overflow:hidden;">
+<tr>
+<td style="padding:36px 32px;width:100%;box-sizing:border-box;">
 <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#1B2811;font-size:15px;line-height:1.65;">
 <p style="margin:0 0 4px;font-size:18px;font-weight:700;color:#1B2811;">Invoice window closed</p>
 <p style="margin:0 0 8px;">Hi Ada, the payment window for your <strong>August Dues</strong> invoice (2,500.00) expired without a completed payment.</p>
 <p style="margin:0 0 20px;color:#5B6472;font-size:13px;">No need to contact your rep &mdash; generate a fresh account number and try again whenever you&rsquo;re ready.</p>
-<table role="presentation" cellpadding="0" cellspacing="0">
+<table role="presentation" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
 <tr>
 <td style="border-radius:8px;background-color:#1B2811;">
 <a href="https://kontributa.online" style="display:inline-block;padding:12px 22px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:14px;font-weight:600;color:#F4FAED;text-decoration:none;">Generate a new invoice</a>
@@ -510,9 +549,12 @@ ${headerHtml}
 </div>
 </td>
 </tr>
+</table>
+</td>
+</tr>
 <tr>
-<td style="padding:22px 4px 0;">
-<table role="presentation" cellpadding="0" cellspacing="0">
+<td style="padding:22px 4px 0;width:100%;">
+<table role="presentation" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
 <tr>
 <td style="padding-right:10px;vertical-align:middle;">
 ${footerLogoSvg}

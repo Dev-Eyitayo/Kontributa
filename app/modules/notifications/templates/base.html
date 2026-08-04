@@ -7,18 +7,18 @@
 <title>{% block title %}Kontributa{% endblock %}</title>
 </head>
 <body style="margin:0;padding:0;background-color:#F4FAED;">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#F4FAED;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;min-width:100%;background-color:#F4FAED;border-collapse:collapse;">
 <tr>
 <td align="center" style="padding:40px 16px;">
-<table role="presentation" width="480" cellpadding="0" cellspacing="0" style="width:480px;max-width:100%;">
+<table role="presentation" width="480" cellpadding="0" cellspacing="0" style="width:480px;max-width:100%;border-collapse:collapse;box-sizing:border-box;">
 
-<!-- Dark Forest Green Header with PNG Logo Lockup -->
+<!-- Dark Forest Green Header with PNG Logo Lockup - Exact 100% Width -->
 <tr>
-<td style="padding:0 0 20px;">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#1B2811;border-radius:12px;overflow:hidden;box-shadow:0 4px 14px rgba(27,40,17,0.18);">
+<td style="padding:0 0 20px;width:100%;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;min-width:100%;border-collapse:collapse;box-sizing:border-box;background-color:#1B2811;border-radius:12px;overflow:hidden;box-shadow:0 4px 14px rgba(27,40,17,0.18);">
 <tr>
-<td style="padding:20px 24px;background:linear-gradient(135deg, #1B2811 0%, #2A3E1B 100%);">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+<td style="padding:20px 24px;width:100%;box-sizing:border-box;background:linear-gradient(135deg, #1B2811 0%, #2A3E1B 100%);">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;min-width:100%;border-collapse:collapse;">
 <tr>
 <td style="vertical-align:middle;">
 <img src="{{ header_logo_url|default('https://kontributa.online/logo/header-lockup-dark.png') }}" width="160" height="40" alt="Kontributa" style="display:block;border:0;outline:none;max-width:100%;height:auto;">
@@ -38,17 +38,23 @@ Group Finance
 
 <!-- Content card -->
 <tr>
-<td style="background-color:#ffffff;border:1px solid rgba(27,40,17,0.14);border-left:4px solid {% block accent_color %}#1B2811{% endblock %};border-radius:10px;padding:36px 32px;">
+<td style="width:100%;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;min-width:100%;border-collapse:collapse;box-sizing:border-box;background-color:#ffffff;border:1px solid rgba(27,40,17,0.14);border-left:4px solid {% block accent_color %}#1B2811{% endblock %};border-radius:10px;overflow:hidden;">
+<tr>
+<td style="padding:36px 32px;width:100%;box-sizing:border-box;">
 <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#1B2811;font-size:15px;line-height:1.65;">
 {% block content %}{% endblock %}
 </div>
 </td>
 </tr>
+</table>
+</td>
+</tr>
 
 <!-- Footer -->
 <tr>
-<td style="padding:22px 4px 0;">
-<table role="presentation" cellpadding="0" cellspacing="0">
+<td style="padding:22px 4px 0;width:100%;">
+<table role="presentation" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
 <tr>
 <td style="padding-right:10px;vertical-align:middle;">
 <img src="{{ icon_url|default('https://kontributa.online/logo/icon-light.svg') }}" width="16" height="16" alt="" style="display:block;border:0;outline:none;">
